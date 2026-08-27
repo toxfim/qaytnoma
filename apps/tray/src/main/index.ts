@@ -24,8 +24,23 @@ import { openSettingsWindow } from './settings-window.js';
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
 const ASSETS = join(ROOT, 'assets');
 
-/** Ishga tushirishda oyna ko'rsatmaslik uchun bayroq (startup uchun). */
-const HIDDEN_FLAG = '--hidden';
+/**
+ * Avtomatik ishga tushirish holati.
+ *
+ * DIQQAT — Windows'da `getLoginItemSettings` yozuvni BUYRUQ QATORI bo'yicha
+ * solishtiradi: `setLoginItemSettings` ga `args` berilgan bo'lsa, o'qishda ham
+ * aynan shu `args` berilishi shart, aks holda doim `false` qaytadi. Ilgari
+ * `--hidden` bilan yozib, argumentsiz o'qilardi — natijada menyudagi belgi hech
+ * qachon chiqmasdi va o'chirib ham bo'lmasdi. Endi argument umuman
+ * ishlatilmaydi (dastur uni o'qimas ham edi), yozish va o'qish mos.
+ *
+ * Ishlab chiqish rejimida (`npx electron .`) yozuv `electron.exe` ga ishora
+ * qilib, login'da bo'sh Electron oynasini ochardi — shuning uchun faqat
+ * paketlangan dasturda ishlaydi.
+ */
+function isAutoLaunchEnabled(): boolean {
+  return app.isPackaged && app.getLoginItemSettings().openAtLogin;
+}
 
 let tray: Tray | null = null;
 let store: Store;
@@ -144,9 +159,10 @@ function buildMenu(state: AppState): MenuItemConstructorOptions[] {
       click: () => openSettingsWindow(store, onConfigSaved),
     },
     {
-      label: 'Ishga tushganda ochilsin',
+      label: app.isPackaged ? 'Ishga tushganda ochilsin' : 'Ishga tushganda ochilsin (faqat o`rnatilgan dasturda)',
       type: 'checkbox',
-      checked: app.getLoginItemSettings().openAtLogin,
+      enabled: app.isPackaged,
+      checked: isAutoLaunchEnabled(),
       click: (item) => setAutoLaunch(item.checked),
     },
     { type: 'separator' },
@@ -191,17 +207,26 @@ async function applyWatcher(config: BarcodeerConfig): Promise<void> {
   store.update({ watching: true });
 }
 
+/**
+ * Avtomatik ishga tushirishni ta'minlaydi — `goal.md` dasturning startup
+ * ilovalarida bo'lishini talab qiladi.
+ *
+ * Har ishga tushirishda tekshiriladi, bir marta emas: Windows yozuvi `.exe`
+ * ning aniq yo'liga bog'langan, dastur yangilanib boshqa papkaga tushsa
+ * (yoki eski yozuv ishlab chiqish nusxasiga ishora qilsa) u bekor bo'ladi va
+ * dastur o'zini qayta ro'yxatdan o'tkazadi. Faqat foydalanuvchi menyudan
+ * ochiq o'chirgan bo'lsa (`config.autoLaunchDisabled`) tegilmaydi.
+ */
 function applyAutoLaunch(config: BarcodeerConfig): void {
-  // Birinchi ishga tushirishda avtomatik ochilishni yoqamiz — `goal.md`
-  // dasturning startup ilovalarida bo'lishini talab qiladi.
-  if (!app.getLoginItemSettings().openAtLogin && config.enabled) setAutoLaunch(true);
+  if (!app.isPackaged || config.autoLaunchDisabled) return;
+  if (!app.getLoginItemSettings().openAtLogin) setAutoLaunch(true);
 }
 
+/** Menyudan yoqish/o'chirish — foydalanuvchi qarori sozlamada eslab qolinadi. */
 function setAutoLaunch(enabled: boolean): void {
-  app.setLoginItemSettings({
-    openAtLogin: enabled,
-    args: [HIDDEN_FLAG],
-  });
+  if (!app.isPackaged) return;
+  app.setLoginItemSettings({ openAtLogin: enabled });
+  void saveConfig(store.patchConfig({ autoLaunchDisabled: !enabled })).catch(() => {});
   render(store.state);
 }
 

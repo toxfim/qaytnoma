@@ -12,6 +12,7 @@
     "clean": "tsc -b --clean",
     "typecheck": "tsc -b --noEmit false --pretty",
     "dev": "pnpm --filter @barcodeer/tray dev",
+    "front": "pnpm --filter @barcodeer/landing dev",
     "scan": "pnpm --filter @barcodeer/core cli scan",
     "ingest": "pnpm --filter @barcodeer/core cli ingest",
     "lint": "prettier --check \"**/*.{ts,json,md}\"",

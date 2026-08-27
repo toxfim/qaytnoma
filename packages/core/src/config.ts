@@ -20,6 +20,12 @@ export function defaultDataDir(): string {
 export const configSchema = z.object({
   /** Dastur yoqilganmi — o'chirilgan bo'lsa skanerlash ham, kuzatuv ham ishlamaydi. */
   enabled: z.boolean().default(true),
+  /**
+   * Foydalanuvchi Windows bilan avtomatik ishga tushishni ochiq o'chirgan.
+   * Standart holatda dastur o'zini startup'ga qo'shadi va har ishga tushganda
+   * yozuv joyida ekanini tekshiradi; bu bayroq o'sha tekshiruvni to'xtatadi.
+   */
+  autoLaunchDisabled: z.boolean().default(false),
 
   /**
    * Google Sheets hujjatining ID si.
