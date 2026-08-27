@@ -61,8 +61,10 @@ pnpm deploy:installer      # scp download/{qaytnoma-setup.exe,meta.json} → ser
 ```
 
 DNS: `qaytnoma.tez-agent.uz` → A `139.162.197.219` (ahost, DNS-хостинг →
-DNS-менеджер). Sertifikat: `certbot --nginx -d qaytnoma.tez-agent.uz`,
-avtomatik yangilanadi.
+DNS-менеджер; nameserverlar rdns1-3.ahost.uz). Sertifikat:
+`scripts/enable-https.sh` — serverdagi cron DNS tarqalgach certbot'ni bir
+marta ishga tushiradi (jurnal `/var/log/qaytnoma-https.log`), keyin
+certbot'ning o'z taymeri yangilab turadi.
 
 Versiya raqami `apps/tray/package.json` dan olinadi va `meta.json` orqali
 sahifaga tushadi; `app.js` dagi `metaBottom` / `foot` faqat zaxira matn.
