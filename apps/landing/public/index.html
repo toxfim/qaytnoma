@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="uz">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Qaytnoma — Windows uchun ilova</title>
+    <meta
+      name="description"
+      content="Skanerlangan Uzum qaytarim hujjatlarini avtomatik o'qib, Google Sheets'ga yozadigan Windows ilovasi."
+    />
+    <link rel="icon" href="assets/icon.png" type="image/png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="header wrap">
+        <div class="brand">
+          <div class="brand__mark"><div class="brand__bars"></div></div>
+          <span class="brand__name">qaytnoma</span>
+        </div>
+        <div class="lang" role="group" aria-label="Til / Язык">
+          <button class="lang__btn" data-lang="uz" aria-pressed="true">UZ</button>
+          <button class="lang__btn" data-lang="ru" aria-pressed="false">RU</button>
+        </div>
+      </header>
+
+      <section class="hero wrap">
+        <div>
+          <div class="badge">
+            <span class="badge__dot"></span>
+            <span data-t="badge"></span>
+          </div>
+          <h1 class="hero__title" data-t="h1"></h1>
+          <p class="hero__lede" data-t="lede"></p>
+
+          <div class="hero__actions">
+            <a class="btn-primary" href="download/qaytnoma-setup.exe" download>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path
+                  d="M10 2v11m0 0 4.5-4.5M10 13 5.5 8.5M3 16.5h14"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span data-t="cta"></span>
+            </a>
+            <div class="hero__meta">
+              <strong data-t="metaTop"></strong>
+              <span data-t="metaBottom"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="shot">
+          <div class="shot__glow"></div>
+          <div class="window">
+            <div class="window__bar">
+              <span class="window__dot"></span>
+              <span class="window__dot"></span>
+              <span class="window__dot"></span>
+              <span class="window__name">qaytnoma.exe</span>
+            </div>
+            <div class="window__body">
+              <img
+                src="img/qn-hero.webp"
+                alt="Qaytnoma sozlamalar oynasi"
+                width="634"
+                height="744"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section wrap">
+        <h2 class="section__title" data-t="featTitle"></h2>
+        <div class="features">
+          <div class="card">
+            <div class="card__num">01</div>
+            <h3 class="card__title" data-t="f1t"></h3>
+            <p class="card__body" data-t="f1b"></p>
+          </div>
+          <div class="card">
+            <div class="card__num">02</div>
+            <h3 class="card__title" data-t="f2t"></h3>
+            <p class="card__body" data-t="f2b"></p>
+          </div>
+          <div class="card">
+            <div class="card__num">03</div>
+            <h3 class="card__title" data-t="f3t"></h3>
+            <p class="card__body" data-t="f3b"></p>
+          </div>
+          <div class="card card--dark">
+            <div class="card__num">04</div>
+            <h3 class="card__title" data-t="f4t"></h3>
+            <p class="card__body" data-t="f4b"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section wrap">
+        <div class="shots">
+          <div class="panel">
+            <!-- Maketdagi ikkinchi rasm uyasi bo'sh qolgan. Skanerlangan
+                 hujjatlarda mijozlarning ismi va telefon raqami bo'lgani uchun
+                 bu yerga real skan qo'yilmadi — skrinshot tayyor bo'lganda
+                 `img/qn-shot-2.webp` nomi bilan qo'ying va shu blokni <img>
+                 bilan almashtiring. -->
+            <div class="panel__slot" data-t="slotEmpty"></div>
+            <div class="panel__caption" data-t="shot2"></div>
+          </div>
+
+          <div class="panel panel--flex">
+            <div class="panel__head">
+              <span class="panel__led"></span>
+              <span class="panel__file">Uzum Invoice — 15-0000163307</span>
+              <span class="panel__tag" data-t="testBadge"></span>
+            </div>
+            <div class="panel__scroll">
+              <table class="sheet">
+                <thead>
+                  <tr>
+                    <th>Номер документа</th>
+                    <th>Ид документа</th>
+                    <th>Дата составления</th>
+                    <th>СКУ</th>
+                    <th>ШК</th>
+                    <th class="qty">Кол-во</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>163307</td>
+                    <td>15-0000163307</td>
+                    <td class="dim">2026-03-05 19:38</td>
+                    <td>NOVYGOD-CIF0001-АЛЫЙ</td>
+                    <td class="dim">1000076316479</td>
+                    <td class="qty">1</td>
+                  </tr>
+                  <tr>
+                    <td>163307</td>
+                    <td>15-0000163307</td>
+                    <td class="dim">2026-03-05 19:38</td>
+                    <td>NOVYGOD-CIF0001-БАГРОВ</td>
+                    <td class="dim">1000076317322</td>
+                    <td class="qty">6</td>
+                  </tr>
+                  <tr>
+                    <td>163307</td>
+                    <td>15-0000163307</td>
+                    <td class="dim">2026-03-05 19:38</td>
+                    <td>NOVYGOD-CIF0001-БЕЛЫЙ</td>
+                    <td class="dim">1000019726440</td>
+                    <td class="qty">8</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="panel__caption" data-t="shot3"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section wrap">
+        <div class="install">
+          <div>
+            <h2 class="section__title" data-t="instTitle"></h2>
+            <p class="install__lede" data-t="instLede"></p>
+            <a class="btn-outline" href="download/qaytnoma-setup.exe" download data-t="cta2"></a>
+          </div>
+          <div class="steps">
+            <div class="step">
+              <div class="step__num">1</div>
+              <div>
+                <h3 class="step__title" data-t="s1t"></h3>
+                <p class="step__body" data-t="s1b"></p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step__num">2</div>
+              <div>
+                <h3 class="step__title" data-t="s2t"></h3>
+                <p class="step__body" data-t="s2b"></p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step__num">3</div>
+              <div>
+                <h3 class="step__title" data-t="s3t"></h3>
+                <p class="step__body" data-t="s3b"></p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step__num">4</div>
+              <div>
+                <h3 class="step__title" data-t="s4t"></h3>
+                <p class="step__body" data-t="s4b"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer wrap">
+        <div class="footer__brand">qaytnoma</div>
+        <div class="footer__meta" data-t="foot"></div>
+      </footer>
+    </div>
+
+    <script src="assets/app.js"></script>
+  </body>
+</html>

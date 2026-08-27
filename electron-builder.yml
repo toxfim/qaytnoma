@@ -1,0 +1,64 @@
+# Qaytnoma o'rnatgichi.
+#
+# Dastur `build/app/` dan yig'iladi — uni `scripts/build-installer.mjs`
+# tayyorlaydi (nega alohida papka kerakligi o'sha faylda tushuntirilgan).
+# Bevosita `pnpm build:installer` ni ishlating, bu faylni qo'lda chaqirmang.
+
+appId: uz.uzum.qaytnoma
+productName: Qaytnoma
+copyright: Uzum Market
+
+directories:
+  app: build/app
+  buildResources: build/resources
+  # Oraliq natijalar (`win-unpacked`, blockmap) shu yerda qoladi; landing
+  # sahifasiga faqat tayyor `.exe` ko'chiriladi — aks holda ochilgan ilovaning
+  # butun ichi veb-ildizga tushib, tashqariga ochiq bo'lardi.
+  output: build/dist
+
+# Tesseract til fayllari (rus + eng, ~25 MB). Dastur offline ishlashi kerak,
+# shuning uchun ular ilova bilan birga keladi va `resources/tessdata` da yotadi.
+extraResources:
+  - from: packages/core/.tessdata
+    to: tessdata
+    filter:
+      - '*.traineddata.gz'
+
+# Native modul (sharp) allaqachon to'g'ri platforma binarysi bilan
+# `npm install` orqali o'rnatilgan — electron-builder uni qayta qurmasin.
+npmRebuild: false
+nodeGypRebuild: false
+buildDependenciesFromSource: false
+
+# Arxiv ichidan chiqarilishi kerak bo'lganlar: native `.node` fayllar va
+# WASM/til resurslari asar ichida ishlamaydi.
+asar: true
+asarUnpack:
+  - '**/node_modules/sharp/**'
+  - '**/node_modules/@img/**'
+  - '**/node_modules/tesseract.js-core/**'
+  - '**/node_modules/zxing-wasm/**'
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/resources/icon.ico
+  # Kod imzosi yo'q — o'rnatishda Windows SmartScreen ogohlantiradi.
+  # Landing sahifasida buni qanday chetlab o'tish yozilgan.
+  signAndEditExecutable: true
+
+nsis:
+  # Administrator huquqi talab qilinmaydi — landing sahifasida shunday va'da
+  # qilingan, shuning uchun har bir foydalanuvchi uchun alohida o'rnatiladi.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Qaytnoma
+  artifactName: qaytnoma-setup.exe
+  deleteAppDataOnUninstall: false
+  installerLanguages:
+    - en_US
+    - ru_RU

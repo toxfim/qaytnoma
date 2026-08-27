@@ -1,0 +1,21 @@
+{
+  "name": "@barcodeer/tray",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b && electron .",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@barcodeer/core": "workspace:*",
+    "@barcodeer/scanner": "workspace:*",
+    "@barcodeer/shared": "workspace:*",
+    "chokidar": "^4.0.3"
+  },
+  "devDependencies": {
+    "electron": "^40.0.0"
+  }
+}

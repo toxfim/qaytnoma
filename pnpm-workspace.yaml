@@ -1,0 +1,11 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# Ushbu paketlar o'rnatishda native binary yuklab oladi / kompilyatsiya qiladi.
+allowBuilds:
+  electron: true
+  electron-winstaller: false  # Squirrel ishlatilmaydi (NSIS tanlangan)
+  esbuild: true
+  sharp: true
+  tesseract.js: true

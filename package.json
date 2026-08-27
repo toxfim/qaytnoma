@@ -1,0 +1,28 @@
+{
+  "name": "barcodeer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Uzum Market qaytarim hujjatlarini skanerdan Google Sheets'ga avtomatik ko'chirish",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "typecheck": "tsc -b --noEmit false --pretty",
+    "dev": "pnpm --filter @barcodeer/tray dev",
+    "scan": "pnpm --filter @barcodeer/core cli scan",
+    "ingest": "pnpm --filter @barcodeer/core cli ingest",
+    "lint": "prettier --check \"**/*.{ts,json,md}\"",
+    "format": "prettier --write \"**/*.{ts,json,md}\"",
+    "build:installer": "pnpm build && node scripts/build-installer.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "electron-builder": "^26.0.12"
+  }
+}

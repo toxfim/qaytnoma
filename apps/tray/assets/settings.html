@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="uz">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>Qaytnoma — sozlamalar</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #1a1d21;
+        --muted: #6b7280;
+        --border: #d7dbe0;
+        --accent: #1f7a4d;
+        --danger: #b91c1c;
+        --field: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1b1e23;
+          --fg: #e8eaed;
+          --muted: #9aa3ad;
+          --border: #363b43;
+          --accent: #4ade80;
+          --danger: #f87171;
+          --field: #23272e;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px;
+        font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p.lead { margin: 0 0 20px; color: var(--muted); }
+      fieldset {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px;
+        margin: 0 0 16px;
+      }
+      legend { padding: 0 6px; font-weight: 600; }
+      label { display: block; margin-bottom: 12px; }
+      label > span { display: block; margin-bottom: 4px; font-weight: 500; }
+      label > small { display: block; margin-top: 3px; color: var(--muted); font-weight: 400; }
+      input[type="text"], input[type="number"] {
+        width: 100%;
+        padding: 7px 9px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--field);
+        color: inherit;
+        font: inherit;
+      }
+      .row { display: flex; gap: 8px; align-items: flex-start; }
+      .row input { flex: 1; }
+      .check { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+      .check input { margin: 0; }
+      button {
+        padding: 7px 14px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--field);
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+      footer { display: flex; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 20px; }
+      #status { flex: 1; font-size: 13px; }
+      #status.err { color: var(--danger); }
+      #status.ok { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <h1>Qaytnoma sozlamalari</h1>
+    <p class="lead">Skanerlangan qaytarim hujjatlari Google Sheets'ga yoziladi va PDF sifatida saqlanadi.</p>
+
+    <form id="form">
+      <fieldset>
+        <legend>Google Sheets</legend>
+        <label>
+          <span>Spreadsheet ID</span>
+          <input type="text" name="spreadsheetId" required />
+          <small>Havoladagi <code>/d/</code> va <code>/edit</code> orasidagi qism.</small>
+        </label>
+        <label>
+          <span>Varaq nomi</span>
+          <input type="text" name="sheetName" required />
+        </label>
+        <label>
+          <span>Service account kaliti</span>
+          <div class="row">
+            <input type="text" name="serviceAccountPath" required />
+            <button type="button" data-pick="file" data-target="serviceAccountPath">Tanlash…</button>
+          </div>
+          <small>Ushbu service account e-pochtasiga jadvalga tahrirlash huquqi berilgan bo'lishi kerak.</small>
+        </label>
+        <div class="check">
+          <input type="checkbox" name="flagColumn" id="flagColumn" />
+          <label for="flagColumn" style="margin: 0">Tekshirish kerak bo'lgan qatorlarni <code>⚠</code> bilan belgilash</label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Fayllar</legend>
+        <label>
+          <span>PDF arxivi papkasi</span>
+          <div class="row">
+            <input type="text" name="invoicesRoot" required />
+            <button type="button" data-pick="folder" data-target="invoicesRoot">Tanlash…</button>
+          </div>
+          <small>Hujjatlar <code>{papka}/{skan sanasi}/{hujjat raqami}.pdf</code> ko'rinishida saqlanadi.</small>
+        </label>
+        <label>
+          <span>Kuzatiladigan papka (ixtiyoriy)</span>
+          <div class="row">
+            <input type="text" name="hotFolder" placeholder="Ishlatilmaydi" />
+            <button type="button" data-pick="folder" data-target="hotFolder">Tanlash…</button>
+            <button type="button" data-clear="hotFolder">Tozalash</button>
+          </div>
+          <small>Skanerning o'z tugmasi orqali chiqqan fayllar shu papkaga tushsa, avtomatik qayta ishlanadi.</small>
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Uzum katalogi (Баркод &rarr; Скю)</legend>
+        <p style="margin: 0 0 12px; color: var(--muted)">
+          SKU ni rasmdan o'qish aniqligi atigi ~47%. Katalog ulanganda SKU
+          shtrix-kod bo'yicha to'g'ridan-to'g'ri olinadi va 100% to'g'ri bo'ladi.
+        </p>
+        <label>
+          <span>Katalog jadvali ID</span>
+          <input type="text" name="catalogueSpreadsheetId" placeholder="Ishlatilmaydi" />
+          <small>Bo'sh qoldirilsa SKU faqat OCR dan olinadi.</small>
+        </label>
+        <label>
+          <span>Varaq nomi</span>
+          <input type="text" name="catalogueSheetName" />
+        </label>
+        <div class="row">
+          <label style="flex: 1">
+            <span>Скю ustuni</span>
+            <input type="text" name="catalogueSkuColumn" />
+          </label>
+          <label style="flex: 1">
+            <span>Баркод ustuni</span>
+            <input type="text" name="catalogueBarcodeColumn" />
+          </label>
+          <label style="flex: 1">
+            <span>Yangilash oralig'i (soat)</span>
+            <input type="number" name="catalogueMaxAgeHours" min="0" step="1" />
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Skaner</legend>
+        <label>
+          <span>Qurilma nomi</span>
+          <input type="text" name="scannerName" />
+          <small>Nomning bir qismi yetarli, masalan <code>DS-530</code>.</small>
+        </label>
+        <label>
+          <span>Ruxsat (DPI)</span>
+          <input type="number" name="scanDpi" min="100" max="1200" step="50" />
+          <small>600 — DS-530 II ning optik maksimumi. Pastroq qiymat tezroq, lekin OCR aniqligi pasayadi.</small>
+        </label>
+      </fieldset>
+
+      <footer>
+        <span id="status"></span>
+        <button type="button" id="test">Ulanishni tekshirish</button>
+        <button type="button" id="cancel">Bekor qilish</button>
+        <button type="submit" class="primary">Saqlash</button>
+      </footer>
+    </form>
+
+    <script>
+      const api = window.barcodeer;
+      const form = document.getElementById('form');
+      const status = document.getElementById('status');
+
+      const setStatus = (text, kind) => {
+        status.textContent = text;
+        status.className = kind ?? '';
+      };
+
+      const load = async () => {
+        const cfg = await api.load();
+        for (const [key, value] of Object.entries(cfg)) {
+          const field = form.elements[key];
+          if (!field) continue;
+          if (field.type === 'checkbox') field.checked = Boolean(value);
+          else field.value = value ?? '';
+        }
+      };
+
+      form.addEventListener('click', async (event) => {
+        const button = event.target.closest('button');
+        if (!button) return;
+
+        if (button.dataset.pick) {
+          const picked =
+            button.dataset.pick === 'file'
+              ? await api.pickFile('Fayl tanlang')
+              : await api.pickFolder('Papka tanlang');
+          if (picked) form.elements[button.dataset.target].value = picked;
+        }
+        if (button.dataset.clear) form.elements[button.dataset.clear].value = '';
+      });
+
+      document.getElementById('test').addEventListener('click', async () => {
+        setStatus('Tekshirilmoqda…');
+        const res = await api.testSheets();
+        setStatus(res.message, res.ok ? 'ok' : 'err');
+      });
+
+      document.getElementById('cancel').addEventListener('click', () => api.close());
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const data = Object.fromEntries(new FormData(form));
+        const res = await api.save({
+          ...data,
+          scanDpi: Number(data.scanDpi) || 600,
+          catalogueMaxAgeHours: Number(data.catalogueMaxAgeHours) || 24,
+          hotFolder: data.hotFolder || null,
+          catalogueSpreadsheetId: data.catalogueSpreadsheetId || null,
+          flagColumn: form.elements.flagColumn.checked,
+        });
+        if (res.ok) api.close();
+        else setStatus(res.error ?? 'Saqlab bo`lmadi', 'err');
+      });
+
+      load().catch((err) => setStatus(String(err), 'err'));
+    </script>
+  </body>
+</html>

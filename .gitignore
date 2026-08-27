@@ -1,0 +1,46 @@
+# --- Secrets (NEVER commit) ---
+.env
+.env.local
+.env.*.local
+credentials.local.json
+credentials.json
+*service-account*.json
+*.pem
+*.p12
+
+# --- Dependencies ---
+node_modules/
+.pnpm-store/
+
+# --- Build output ---
+dist/
+out/
+build/
+release/
+*.tsbuildinfo
+
+# --- Runtime / scratch ---
+tmp/
+.tmp/
+scratch/
+debug-out/
+logs/
+*.log
+
+# --- Editors / OS ---
+.vscode/*
+!.vscode/extensions.json
+.idea/
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- Test scan artifacts (large binaries) ---
+samples/scans/
+*.bmp
+.tessdata/
+.tessdata_best/
+
+# --- Installer build ---
+build/
+apps/landing/public/download/
