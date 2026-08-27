@@ -61,8 +61,11 @@ $FORMATS = @{
   'TIFF' = '{B96B3CB1-0728-11D3-9D7B-0000F81EF32E}'
 }
 
+$script:logClock = [System.Diagnostics.Stopwatch]::StartNew()
 function Write-Log([string] $msg) {
-  [Console]::Error.WriteLine('[wia] ' + $msg)
+  # Vaqt belgisi — WIA ulanish, sozlash va har bir Transfer qancha olishini
+  # ko'rish uchun (skaner tezligini baholashda kerak bo'ldi).
+  [Console]::Error.WriteLine(('[wia {0,6:N1}s] ' -f $script:logClock.Elapsed.TotalSeconds) + $msg)
 }
 
 function Emit-Json($obj) {
@@ -204,6 +207,11 @@ try {
     $img.SaveFile($path)
     $pages.Add($path) | Out-Null
     Write-Log ('sahifa {0}: {1}x{2} -> {3} ({4:N1} MB)' -f $i, $img.Width, $img.Height, (Split-Path $path -Leaf), ((Get-Item $path).Length / 1MB))
+
+    # Sahifa tayyor bo'lishi bilan Node'ga xabar beramiz — u qayta ishlashni
+    # skaner keyingi varaqni o'qiyotgan paytda boshlaydi. Yakuniy JSON dan
+    # farqi: `event` maydoni bor va `ok` yo'q.
+    Emit-Json @{ event = 'page'; index = ($i - 1); path = $path }
 
     [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($img)
     $img = $null

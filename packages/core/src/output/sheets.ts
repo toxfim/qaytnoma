@@ -46,6 +46,8 @@ export interface AppendResult {
 export class SheetsWriter {
   readonly #api: sheets_v4.Sheets;
   readonly #opts: Required<Omit<SheetsWriterOptions, 'credentials'>>;
+  /** Sarlavhalar shu nusxada allaqachon tekshirilgan — 3 ta API so'rovi tejaladi. */
+  #headersEnsured = false;
 
   constructor(opts: SheetsWriterOptions) {
     // `googleapis` o'rniga faqat Sheets mijozi ishlatiladi: to'liq paket
@@ -77,8 +79,15 @@ export class SheetsWriter {
     };
   }
 
-  /** Varaq bo'sh bo'lsa sarlavha qatorini qo'yadi. */
+  /**
+   * Varaq bo'sh bo'lsa sarlavha qatorini qo'yadi.
+   *
+   * Bir nusxada faqat bir marta bajariladi: uchta ketma-ket API so'rovi
+   * (~1.5 s) har skanerlashda takrorlanishi shart emas. Tray ilova bitta
+   * yozuvchini skanerlashlar orasida saqlaydi.
+   */
   async ensureHeaders(): Promise<void> {
+    if (this.#headersEnsured) return;
     const existing = await this.check();
 
     if (!(await this.#hasHeader(this.#opts.sheetName))) {
@@ -92,6 +101,7 @@ export class SheetsWriter {
         await this.#append(LOG_SHEET_NAME, [[...LOG_SHEET_HEADERS]]);
       }
     }
+    this.#headersEnsured = true;
   }
 
   /** Hujjatlarni asosiy varaqqa va diagnostikani `_log` ga qo'shadi. */

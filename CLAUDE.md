@@ -17,7 +17,8 @@ pnpm --filter @barcodeer/core exec tsc --noEmit -p tsconfig.json   # typecheck o
 # Pipeline, without Electron
 cd packages/core
 npx tsx src/cli.ts check                 # config + scanner + Sheets connectivity
-npx tsx src/cli.ts scan                  # scan the ADF and run the full pipeline
+npx tsx src/cli.ts scan                  # scan the ADF and run the full pipeline (streaming)
+npx tsx src/cli.ts scan --pages 1 --no-sheets   # scan only n sheets, dry run
 npx tsx src/cli.ts ingest <dir> --no-sheets   # re-run on existing images, no writes
 npx tsx src/cli.ts sync-catalogue        # force-refresh Баркод → Скю (auto-refreshes every 24h)
 
@@ -156,6 +157,9 @@ longer the mechanism for *finding* rows.
 - **`zxing-wasm@3.1.3` leaks state on the raw-pixmap path** — the call right after a successful decode can return the *previous* result even on an empty image. Use the encoded-PNG `Blob` path (`barcode/decode.ts`).
 - **libvips has no BMP loader** and the DS-530 II only offers BMP over WIA, so `image/bmp.ts` decodes it in Node and hands sharp raw pixels.
 - **Deskew is mandatory, not optional.** See `docs/OCR-BENCHMARK.md`.
+- **Scan at 300 DPI, not 600.** Measured identical accuracy; scan and processing both ~2x faster. `WORK_WIDTH` (2481 px) already is 300 DPI, so 600 DPI pixels were never used.
+- **Skip SKU OCR when the catalogue knows the barcode** (`ExtractOptions.knownSku`) — it was the single largest per-row cost (2 Tesseract passes) for a value that gets overwritten anyway.
+- **Scanner and pipeline overlap** (`scanStream` + `AsyncIterable` pages in `runPipeline`). Per-page WIA events come from `wia-scan.ps1` stdout; never make `runPipeline` wait for the whole batch.
 
 **Known pitfalls to design around:** scanners write incrementally, so ingesting mid-write corrupts files; higher DPI is *not* monotonically better for Code128 (test 200/300/400 empirically); ZXing has narrow tilt tolerance on scans — keep a zbar/rotate/upscale fallback; Tesseract PSM 3 returns "Empty page" on single-cell crops; if the hot folder is an SMB share, poll rather than rely on FS events.
 

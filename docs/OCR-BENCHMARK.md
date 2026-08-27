@@ -184,11 +184,60 @@ Ikkita tizim darajasidagi tuzatish ham shu skandan kelib chiqdi:
   (`5850`) soxta hujjat raqami va soxta `15-0000005850` ID si yasalgan edi.
   Endi sana yoki dekodlangan shtrix-kod ham talab qilinadi.
 
-## Tezlik
+## Tezlik — v2
 
-| Bosqich | Vaqt |
-|---|---|
-| Skanerlash (600 DPI, rangli) | ~13 s / sahifa |
-| Sahifani tayyorlash (deskew + binarizatsiya) | ~1.1 s |
-| To'liq quvur | ~10 s / sahifa (13 qatorli sahifada) |
-| 4 sahifa, 3 hujjat, uchdan boshiga | 39 s |
+### DPI: 600 → 300
+
+600 DPI skanlar 300 va 400 ga tushirilib, ikkala to'plamda (toza va qiyshiq)
+qayta o'lchandi. **Aniqlik zarracha o'zgarmadi**: 36/36 qator, 36/36 miqdor,
+36/36 shtrix-kod, 3/3 hujjat maydoni — 600 dagi bilan bir xil. Sabab: to'r
+baribir 2481 px kenglikda (300 DPI) ishlaydi, OCR kesmalari esa standart
+balandlikka keltiriladi — 600 DPI dagi qo'shimcha piksellar hech qayerda
+ishlatilmas edi.
+
+### O'lchov: 2 varoq (13 + 13 qator), baseline vs v2
+
+| Bosqich (sahifasiga) | 600 DPI baseline | 300 DPI, kod o'zgarmagan | 300 DPI + v2 kod |
+|---|---|---|---|
+| Skanerlash | 12.8 s | — | 6.5–9.6 s |
+| Sarlavha OCR (4 oston) | 4962 ms ketma-ket | 2402 ms | parallel, 2 worker |
+| SKU OCR (13 qator) | 3515 ms | 4679 ms | **0 — katalogda bor, o'qilmaydi** |
+| Sarlavha shtrix-kod | 2355 ms | 685 ms | tor kesma |
+| Qator miqdor OCR | 2170 ms ketma-ket | 2448 ms | 4 qator parallel, 3 worker |
+| Qator shtrix-kod | 1955 ms | 1048 ms | |
+| preparePage | 1010 ms | 642 ms | |
+| Arxiv JPEG | 920 ms (mozjpeg) | 849 ms | asosiy yo'ldan tashqarida, mozjpeg'siz |
+| **Qayta ishlash jami** | **17.5 s** | **8.9 s** | **2.1–3.1 s** |
+
+### Uchdan-uchgacha, haqiqiy skaner
+
+| | v1 (600 DPI, ketma-ket) | v2 (300 DPI, oqim) |
+|---|---|---|
+| 1 varoq, 1 qator, Sheets'siz | ~30 s | **11.8 s** |
+| 1 varoq, 9 qator, Sheets bilan | ~32 s | **12.7 s** |
+
+v2 da skanerlash va qayta ishlash BIR VAQTDA ketadi: `wia-scan.ps1` har sahifani
+saqlagach stdout ga hodisa yozadi, Node shu zahoti o'sha sahifani qayta
+ishlaydi — skaner keyingi varaqni o'qiyotgan paytda. Ko'p varoqli to'plamda
+umumiy vaqt "skan + qayta ishlash" emas, skanerlash vaqtiga yaqinlashadi.
+
+Qolgan vaqtning asosiy qismi skanerning o'zi (6.5–9.6 s/varoq) — bu apparat
+chegarasi.
+
+### `Итого` — v2 da topilgan va tuzatilgan
+
+Tezlik ishida `Итого` katagining ikkita muammosi ochildi (ikkalasi v1 da ham
+bor edi, shunchaki ko'rinmagan):
+
+| Muammo | Belgisi | Yechim |
+|---|---|---|
+| Qatorning pastki chizig'i so'lg'in bo'lib topilmadi, keyingi chiziq (imzo bloki, +279 px) olindi | Kesma `166` ning ostiga tushdi, `100` o'qildi | Qator balandligi shablondan olinadi (0.021 x sahifa balandligi ≈ 73 px); topilgan chiziq faqat shu chegara ichida bo'lsa ishlatiladi |
+| PSM 8 toza `11` ni `1` deb o'qidi (takrorlangan ingichka glif) | Σ=11 ≠ Итого=1 → 9 qator bekorga belgilandi | PSM 7 da ham o'qiladi (u `11` beradi); nomzodlar orasidan qatorlar yig'indisiga mos keluvchi tanlanadi |
+
+Ikkinchi yechimning asosi: qatorlar mustaqil o'qilgan, ularning yig'indisi
+bilan tasodifan ustma-ust tushgan OCR xatosi ehtimoli juda kichik. Hech bir
+nomzod mos kelmasa, nomuvofiqlik avvalgidek xato sifatida ko'rsatiladi.
+
+Natija: 8 sahifaning hammasida `Итого` to'g'ri (v1 da 3 tasida null/xato). Dasturiy tomondan yana yutuq beradigan joylar: Sheets API so'rovlari
+(sarlavha tekshiruvi endi bir marta bajariladi), OCR worker'lari (tray ilovada
+skanerlashlar orasida isitilgan holda saqlanadi).

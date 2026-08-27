@@ -6,9 +6,15 @@
  * PowerShell skripti esa hech qanday native bog'liqliksiz, Windows'ning o'z
  * WIA 2.0 interfeysiga to'g'ridan-to'g'ri kiradi.
  *
- * Tekshirilgan: EPSON DS-530II, ADF, 600 DPI rangli, 4 sahifa 53 soniyada;
- * qog'oz tugaganda drayver `WIA_ERROR_PAPER_EMPTY (0x80210003)` qaytaradi va
- * sikl shu bilan to'g'ri yakunlanadi.
+ * Tekshirilgan: EPSON DS-530II, ADF, rangli; qog'oz tugaganda drayver
+ * `WIA_ERROR_PAPER_EMPTY (0x80210003)` qaytaradi va sikl shu bilan to'g'ri
+ * yakunlanadi. O'lchangan tezlik: 600 DPI da ~12.8 s/sahifa.
+ *
+ * OQIM REJIMI (`scanStream`): skript har sahifani saqlagach stdout ga
+ * `{"event":"page",...}` qatorini yozadi. Node shu zahoti sahifani qayta
+ * ishlashni boshlaydi — skaner keyingi varaqni o'qiyotgan paytda. Shunda
+ * to'plamning umumiy vaqti "skan + qayta ishlash" emas, ikkalasidan
+ * kattasiga yaqin bo'ladi.
  */
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -51,6 +57,13 @@ export interface ScanFailure {
 
 export type ScanResult = ScanSuccess | ScanFailure;
 
+/** Skript stdout ga yozadigan oraliq hodisa. */
+interface PageEvent {
+  event: 'page';
+  index: number;
+  path: string;
+}
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
@@ -65,18 +78,17 @@ function scriptPath(): string {
 
 /** Mavjud WIA skanerlar ro'yxati. */
 export async function listScanners(timeoutMs = 15_000): Promise<string[]> {
-  const result = await runScript(['-ListOnly'], timeoutMs);
+  const result = await runScript(['-ListOnly'], timeoutMs, () => {});
   if (result.ok && Array.isArray((result.data as { devices?: unknown }).devices)) {
     return (result.data as { devices: string[] }).devices;
   }
   return [];
 }
 
-/** ADF dagi barcha varaqlarni skanerlaydi. */
-export async function scanBatch(opts: ScanOptions): Promise<ScanResult> {
+function scanArgs(opts: ScanOptions): string[] {
   const args = [
     '-Dpi',
-    String(opts.dpi ?? 600),
+    String(opts.dpi ?? 300),
     '-OutDir',
     opts.outDir,
     '-DataType',
@@ -87,13 +99,71 @@ export async function scanBatch(opts: ScanOptions): Promise<ScanResult> {
     String(opts.maxPages ?? 200),
   ];
   if (opts.deviceName) args.push('-DeviceName', opts.deviceName);
+  return args;
+}
 
-  // Skanerlash uzoq davom etadi: 600 DPI da sahifasiga ~13 s.
-  const result = await runScript(args, opts.timeoutMs ?? 10 * 60_000);
+/** ADF dagi barcha varaqlarni skanerlaydi va hammasi tugagach qaytaradi. */
+export async function scanBatch(opts: ScanOptions): Promise<ScanResult> {
+  const result = await runScript(scanArgs(opts), opts.timeoutMs ?? 10 * 60_000, () => {});
   if (!result.ok) {
     return { ok: false, code: result.code, error: result.error, pages: [] };
   }
   return result.data as ScanResult;
+}
+
+export interface ScanStream {
+  /** Sahifa yo'llari — har biri fayl diskka to'liq yozilgach keladi. */
+  pages: AsyncIterable<string>;
+  /** Skanerlash tugagach yakuniy natija. */
+  result: Promise<ScanResult>;
+}
+
+/**
+ * Skanerlashni boshlaydi va sahifalarni tayyor bo'lishi bilan uzatadi.
+ *
+ * `pages` ni `for await` bilan o'qish mumkin; iteratsiya skanerlash tugab,
+ * barcha sahifalar uzatilgach yakunlanadi. Xato bo'lsa iteratsiya jim
+ * tugaydi — sababini `result` dan oling.
+ */
+export function scanStream(opts: ScanOptions): ScanStream {
+  const queue: string[] = [];
+  let done = false;
+  let wake: (() => void) | null = null;
+
+  const push = (path: string) => {
+    queue.push(path);
+    wake?.();
+  };
+  const finish = () => {
+    done = true;
+    wake?.();
+  };
+
+  const result = runScript(scanArgs(opts), opts.timeoutMs ?? 10 * 60_000, push).then(
+    (r): ScanResult => {
+      finish();
+      if (!r.ok) return { ok: false, code: r.code, error: r.error, pages: [] };
+      return r.data as ScanResult;
+    },
+  );
+
+  const pages: AsyncIterable<string> = {
+    async *[Symbol.asyncIterator]() {
+      for (;;) {
+        if (queue.length > 0) {
+          yield queue.shift()!;
+          continue;
+        }
+        if (done) return;
+        await new Promise<void>((r) => {
+          wake = r;
+        });
+        wake = null;
+      }
+    },
+  };
+
+  return { pages, result };
 }
 
 interface RunOk {
@@ -106,8 +176,17 @@ interface RunErr {
   error: string;
 }
 
-/** PowerShell skriptini ishga tushirib, stdout dagi JSON ni qaytaradi. */
-function runScript(args: string[], timeoutMs: number): Promise<RunOk | RunErr> {
+/**
+ * PowerShell skriptini ishga tushiradi.
+ *
+ * stdout qator-qator o'qiladi: `event:"page"` qatorlari `onPage` ga uzatiladi,
+ * oxirgi (`ok` maydonli) qator esa yakuniy natija. Jarayon xabarlari stderr da.
+ */
+function runScript(
+  args: string[],
+  timeoutMs: number,
+  onPage: (path: string) => void,
+): Promise<RunOk | RunErr> {
   return new Promise((resolvePromise) => {
     const child = spawn(
       'powershell.exe',
@@ -115,7 +194,8 @@ function runScript(args: string[], timeoutMs: number): Promise<RunOk | RunErr> {
       { windowsHide: true },
     );
 
-    let stdout = '';
+    let pending = '';
+    let final: unknown = null;
     let stderr = '';
     let settled = false;
 
@@ -131,9 +211,28 @@ function runScript(args: string[], timeoutMs: number): Promise<RunOk | RunErr> {
       finish({ ok: false, code: 'TIMEOUT', error: `Skanerlash ${timeoutMs} ms ichida tugamadi` });
     }, timeoutMs);
 
+    const handleLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        return;
+      }
+      if (parsed && typeof parsed === 'object' && (parsed as PageEvent).event === 'page') {
+        onPage((parsed as PageEvent).path);
+      } else {
+        final = parsed;
+      }
+    };
+
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
-      stdout += chunk;
+      pending += chunk;
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() ?? '';
+      for (const line of lines) handleLine(line);
     });
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
@@ -145,10 +244,8 @@ function runScript(args: string[], timeoutMs: number): Promise<RunOk | RunErr> {
     });
 
     child.on('close', () => {
-      // Skript natijani stdout ga BITTA JSON qatori sifatida yozadi;
-      // jarayon xabarlari stderr ga ketadi.
-      const line = stdout.trim().split(/\r?\n/).filter(Boolean).pop();
-      if (!line) {
+      if (pending) handleLine(pending);
+      if (final === null) {
         finish({
           ok: false,
           code: 'SCAN_FAILED',
@@ -156,11 +253,7 @@ function runScript(args: string[], timeoutMs: number): Promise<RunOk | RunErr> {
         });
         return;
       }
-      try {
-        finish({ ok: true, data: JSON.parse(line) });
-      } catch {
-        finish({ ok: false, code: 'SCAN_FAILED', error: `JSON tahlil qilinmadi: ${line}` });
-      }
+      finish({ ok: true, data: final });
     });
   });
 }

@@ -61,6 +61,8 @@ async function main(): Promise<void> {
 
   store = new Store(config);
   jobs = new JobRunner(store);
+  // OCR worker'larini fonda isitamiz — birinchi skanerlash 2.4 s tezroq boshlanadi.
+  if (isConfigured(config)) jobs.prewarm();
 
   tray = new Tray(iconFor('off'));
   tray.setToolTip('Qaytnoma');
@@ -205,6 +207,7 @@ function setAutoLaunch(enabled: boolean): void {
 
 async function quit(): Promise<void> {
   if (watcher) await watcher.stop();
+  await jobs.dispose();
   tray?.destroy();
   app.quit();
 }

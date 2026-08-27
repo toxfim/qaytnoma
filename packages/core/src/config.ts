@@ -42,8 +42,8 @@ export const configSchema = z.object({
   /** Kuzatiladigan papka (skanerning o'z tugmasi orqali chiqqan fayllar uchun). */
   hotFolder: z.string().nullable().default(null),
 
-  /** Skanerlash ruxsati. 600 = optik maksimum (DS-530 II). */
-  scanDpi: z.number().int().min(100).max(1200).default(600),
+  /** Skanerlash ruxsati. 300 — aniqlik 600 bilan bir xil, tezlik ikki barobar. */
+  scanDpi: z.number().int().min(100).max(1200).default(300),
   /** Qurilma nomining bir qismi. */
   scannerName: z.string().default('DS-530'),
 
@@ -100,7 +100,7 @@ export function defaults(dataDir = defaultDataDir()): Partial<BarcodeerConfig> {
     flagColumn: true,
     invoicesRoot: join(homedir(), 'Documents', 'Invoices'),
     hotFolder: null,
-    scanDpi: 600,
+    scanDpi: 300,
     scannerName: 'DS-530',
     catalogueSpreadsheetId: null,
     catalogueSheetName: 'Остаток Узум',

@@ -27,8 +27,19 @@ export interface CatalogueOptions extends CatalogueSource {
 }
 
 export interface RunOptions {
-  /** Qayta ishlanadigan sahifa rasmlari (tartib muhim). */
-  pages: readonly string[];
+  /**
+   * Qayta ishlanadigan sahifa rasmlari (tartib muhim).
+   *
+   * `AsyncIterable` berilsa (skaner oqimi), sahifalar kelishi bilan qayta
+   * ishlanadi — skaner keyingi varaqni o'qiyotgan paytda. To'plamning umumiy
+   * vaqti "skan + qayta ishlash" emas, ikkalasidan kattasiga yaqin bo'ladi.
+   */
+  pages: Iterable<string> | AsyncIterable<string>;
+  /**
+   * Tayyor OCR dvigateli. Berilsa qayta ishlatiladi va YOPILMAYDI — tray
+   * ilova uni isitilgan holda saqlaydi (worker'larni yuklash ~2.4 s).
+   */
+  ocr?: OcrEngine;
   /** Tesseract til fayllari papkasi. */
   tessdataPath: string;
   /** SKU lug'ati, katalog va indeks saqlanadigan papka. */
@@ -79,22 +90,34 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     opts.onProgress?.({ type: 'warning', message });
   };
 
+  // OCR worker'lari darhol yuklana boshlaydi — bu katalog sinxronizatsiyasi
+  // va birinchi sahifaning skanerlanishi bilan bir vaqtda ketadi.
+  const ownOcr = opts.ocr === undefined;
+  const ocr = opts.ocr ?? new OcrEngine({ langPath: opts.tessdataPath });
+  const warm = ocr.warmUp().catch(() => {});
+
   const dictionary = await SkuDictionary.open(join(opts.dataDir, 'sku-map.json'));
   const index = await DocumentIndex.open(join(opts.dataDir, 'documents.jsonl'));
   const catalogue = await syncCatalogue(opts, scannedAt, warn);
   const resolver = new SkuResolver(catalogue, dictionary);
 
-  // --- Sahifalarni o'qish ---
-  const ocr = new OcrEngine({ langPath: opts.tessdataPath });
+  // SKU si ma'lum shtrix-kodlar uchun OCR umuman chaqirilmaydi.
+  const knownSku = (barcode: string) => resolver.resolve(barcode, null).trusted;
+
+  // --- Sahifalarni o'qish (kelishi bilan) ---
+  const total = Array.isArray(opts.pages) ? opts.pages.length : undefined;
   let extracted: PageExtraction[];
   try {
+    await warm;
     extracted = [];
-    for (const [i, path] of opts.pages.entries()) {
-      opts.onProgress?.({ type: 'page', index: i, total: opts.pages.length, path });
-      extracted.push(await extractPage(path, i, ocr, {}));
+    let i = 0;
+    for await (const path of opts.pages) {
+      opts.onProgress?.({ type: 'page', index: i, total: total ?? i + 1, path });
+      extracted.push(await extractPage(path, i, ocr, { knownSku }));
+      i++;
     }
   } finally {
-    await ocr.close();
+    if (ownOcr) await ocr.close();
   }
 
   const { documents, orphanPages } = groupIntoDocuments(extracted, { scannedAt });
@@ -130,6 +153,12 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     validateDocument(doc, { knownDocIds, skuFromDictionary: trustedBarcodes });
   }
 
+  // Sarlavha tekshiruvi (tarmoq) PDF yozish (disk) bilan bir vaqtda ketadi.
+  const headersReady = opts.sheets?.ensureHeaders().then(
+    () => null,
+    (err: Error) => err,
+  );
+
   // --- PDF ---
   const pagesByIndex = new Map(extracted.map((p) => [p.pageIndex, p]));
   for (const doc of documents) {
@@ -158,7 +187,8 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
   let flaggedRows = countFlagged(documents);
   if (opts.sheets) {
     try {
-      await opts.sheets.ensureHeaders();
+      const headerError = await headersReady;
+      if (headerError) throw headerError;
       const res = await opts.sheets.appendDocuments(documents);
       rowsAppended = res.rowsAppended;
       flaggedRows = res.flaggedRows;

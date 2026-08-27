@@ -49,5 +49,14 @@ export const BLUE_INK_THRESHOLD = 18;
 /** OCR uchun ishchi ruxsat. 600 DPI skandan shu darajaga tushiriladi. */
 export const WORKING_DPI = 300;
 
-/** Skanerlashning standart ruxsati. */
-export const DEFAULT_SCAN_DPI = 600;
+/**
+ * Skanerlashning standart ruxsati.
+ *
+ * 300, 600 emas: 600 DPI skanlarni 300 ga tushirib o'lchanganda aniqlik
+ * ZARRACHA o'zgarmadi (ikkala skan to'plamida ham 36/36 qator, 36/36 miqdor,
+ * 3/3 hujjat maydoni), skanerlash esa ikki barobar, qayta ishlash esa
+ * 17.5 s → 8.9 s/sahifa tezlashdi. To'r baribir 2481 px kenglikda ishlaydi,
+ * OCR kesmalari esa standart balandlikka keltiriladi — 600 DPI dagi qo'shimcha
+ * piksellar hech qayerda ishlatilmas edi.
+ */
+export const DEFAULT_SCAN_DPI = 300;

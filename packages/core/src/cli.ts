@@ -12,7 +12,7 @@
 import { mkdtemp, readdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { scanBatch, listScanners } from '@barcodeer/scanner';
+import { scanStream, listScanners } from '@barcodeer/scanner';
 import { loadConfig, loadServiceAccount, type BarcodeerConfig } from './config.js';
 import { SheetsWriter } from './output/sheets.js';
 import { runPipeline, type CatalogueOptions, type ProgressEvent } from './pipeline/run.js';
@@ -57,7 +57,8 @@ function printHelp(): void {
 
 Bayroqlar:
   --no-sheets           Google Sheets ga yozmaydi
-  --dpi <n>             Skanerlash ruxsati (standart: konfiguratsiyadan)`);
+  --dpi <n>             Skanerlash ruxsati (standart: konfiguratsiyadan)
+  --pages <n>           Ko'pi bilan n varoq skanerlaydi (sinov uchun)`);
 }
 
 async function commandCheck(config: BarcodeerConfig): Promise<void> {
@@ -134,19 +135,27 @@ async function commandSyncCatalogue(config: BarcodeerConfig): Promise<void> {
 async function commandScan(config: BarcodeerConfig, flags: Set<string>, rest: string[]): Promise<void> {
   const dpiIndex = rest.indexOf('--dpi');
   const dpi = dpiIndex >= 0 ? Number(rest[dpiIndex + 1]) : config.scanDpi;
+  const pagesIndex = rest.indexOf('--pages');
+  const maxPages = pagesIndex >= 0 ? Number(rest[pagesIndex + 1]) : undefined;
 
   const outDir = await mkdtemp(join(tmpdir(), 'barcodeer-scan-'));
   console.log(`Skanerlash boshlandi (${dpi} DPI)...`);
+  const started = Date.now();
 
-  const result = await scanBatch({ dpi, outDir, deviceName: config.scannerName });
+  // Oqim rejimi: sahifalar skanerdan kelishi bilan qayta ishlanadi.
+  const stream = scanStream({ dpi, outDir, deviceName: config.scannerName, maxPages });
+  await process_(config, flags, stream.pages);
+
+  const result = await stream.result;
   if (!result.ok) {
     console.error(`Skanerlash xatosi [${result.code}]: ${result.error}`);
     process.exitCode = 1;
     return;
   }
-  console.log(`${result.pages.length} sahifa skanerlandi (${(result.elapsedMs / 1000).toFixed(1)} s)`);
-
-  await process_(config, flags, result.pages);
+  console.log(
+    `\nSkaner: ${result.pages.length} sahifa, ${(result.elapsedMs / 1000).toFixed(1)} s. ` +
+      `Uchdan-uchgacha (skan + qayta ishlash + yozish): ${((Date.now() - started) / 1000).toFixed(1)} s`,
+  );
 }
 
 async function commandIngest(
@@ -176,7 +185,7 @@ async function commandIngest(
 async function process_(
   config: BarcodeerConfig,
   flags: Set<string>,
-  pages: string[],
+  pages: Iterable<string> | AsyncIterable<string>,
 ): Promise<void> {
   let sheets: SheetsWriter | undefined;
   if (!flags.has('--no-sheets')) {

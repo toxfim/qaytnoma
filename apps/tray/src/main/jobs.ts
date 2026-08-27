@@ -12,6 +12,7 @@ import { Notification, shell } from 'electron';
 import {
   fetchCatalogue,
   loadServiceAccount,
+  OcrEngine,
   runPipeline,
   SheetsWriter,
   SkuCatalogue,
@@ -20,16 +21,46 @@ import {
   type ProgressEvent,
   type RunResult,
 } from '@barcodeer/core';
-import { scanBatch } from '@barcodeer/scanner';
+import { scanStream } from '@barcodeer/scanner';
 import type { Store } from './state.js';
 
 export class JobRunner {
   #running = false;
+  /**
+   * Isitilgan OCR dvigateli — skanerlashlar orasida saqlanadi.
+   * Worker'larni yuklash ~2.4 s; ilova ishga tushganda fonda bajariladi,
+   * shunda birinchi skanerlash ham kutmaydi.
+   */
+  #ocr: OcrEngine | null = null;
+  #ocrPath = '';
+  /** Sheets yozuvchisi ham saqlanadi — sarlavha tekshiruvi bir marta bajariladi. */
+  #sheets: SheetsWriter | null = null;
+  #sheetsKey = '';
 
   constructor(private readonly store: Store) {}
 
   get running(): boolean {
     return this.#running;
+  }
+
+  /** OCR dvigatelini oldindan isitadi (ilova ishga tushganda chaqiriladi). */
+  prewarm(): void {
+    void this.#engine().warmUp().catch(() => {});
+  }
+
+  #engine(): OcrEngine {
+    const path = this.store.state.config.tessdataPath;
+    if (this.#ocr && this.#ocrPath === path) return this.#ocr;
+    // Til papkasi o'zgargan bo'lsa eskisini yopib, yangisini yaratamiz.
+    void this.#ocr?.close().catch(() => {});
+    this.#ocr = new OcrEngine({ langPath: path });
+    this.#ocrPath = path;
+    return this.#ocr;
+  }
+
+  async dispose(): Promise<void> {
+    await this.#ocr?.close().catch(() => {});
+    this.#ocr = null;
   }
 
   /** Skanerdan o'qib, to'liq quvurni bajaradi. */
@@ -43,11 +74,18 @@ export class JobRunner {
       workDir = await mkdtemp(join(tmpdir(), 'barcodeer-'));
       this.store.update({ activity: 'Skanerlanmoqda…' });
 
-      const scan = await scanBatch({
+      // Oqim rejimi: sahifalar skanerdan kelishi bilan qayta ishlanadi —
+      // skaner keyingi varaqni o'qiyotgan paytda.
+      const stream = scanStream({
         dpi: config.scanDpi,
         outDir: workDir,
         deviceName: config.scannerName,
       });
+
+      const [scan, result] = await Promise.all([
+        stream.result,
+        this.#process(config, stream.pages),
+      ]);
 
       if (!scan.ok) {
         this.#fail(scanErrorMessage(scan.code, scan.error));
@@ -57,8 +95,7 @@ export class JobRunner {
         this.#fail('Skanerda qog`oz topilmadi');
         return;
       }
-
-      await this.#process(config, scan.pages);
+      this.#succeed(result);
     } catch (err) {
       this.#fail((err as Error).message);
     } finally {
@@ -122,7 +159,7 @@ export class JobRunner {
     if (!this.#begin('Fayllar qayta ishlanmoqda…')) return;
 
     try {
-      await this.#process(this.store.state.config, paths);
+      this.#succeed(await this.#process(this.store.state.config, paths));
     } catch (err) {
       this.#fail((err as Error).message);
     } finally {
@@ -130,23 +167,32 @@ export class JobRunner {
     }
   }
 
-  async #process(config: BarcodeerConfig, pages: readonly string[]): Promise<void> {
+  async #process(
+    config: BarcodeerConfig,
+    pages: Iterable<string> | AsyncIterable<string>,
+  ): Promise<RunResult> {
     let sheets: SheetsWriter | undefined;
     try {
-      sheets = new SheetsWriter({
-        spreadsheetId: config.spreadsheetId,
-        sheetName: config.sheetName,
-        credentials: await loadServiceAccount(config.serviceAccountPath),
-        flagColumn: config.flagColumn,
-      });
+      const key = [config.spreadsheetId, config.sheetName, config.serviceAccountPath, config.flagColumn].join('|');
+      if (!this.#sheets || this.#sheetsKey !== key) {
+        this.#sheets = new SheetsWriter({
+          spreadsheetId: config.spreadsheetId,
+          sheetName: config.sheetName,
+          credentials: await loadServiceAccount(config.serviceAccountPath),
+          flagColumn: config.flagColumn,
+        });
+        this.#sheetsKey = key;
+      }
+      sheets = this.#sheets;
     } catch (err) {
       // Sheets sozlanmagan bo'lsa ham PDF saqlanadi — skanerlangan qog'oz
       // behuda ketmasligi kerak.
       this.store.update({ activity: `Sheets o'chirildi: ${(err as Error).message}` });
     }
 
-    const result = await runPipeline({
+    return runPipeline({
       pages,
+      ocr: this.#engine(),
       tessdataPath: config.tessdataPath,
       dataDir: config.dataDir,
       invoicesRoot: config.invoicesRoot,
@@ -154,8 +200,6 @@ export class JobRunner {
       catalogue: await catalogueOptions(config),
       onProgress: (event) => this.store.update({ activity: describe(event) }),
     });
-
-    this.#succeed(result);
   }
 
   #begin(activity: string): boolean {
