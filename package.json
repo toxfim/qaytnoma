@@ -17,7 +17,9 @@
     "ingest": "pnpm --filter @barcodeer/core cli ingest",
     "lint": "prettier --check \"**/*.{ts,json,md}\"",
     "format": "prettier --write \"**/*.{ts,json,md}\"",
-    "build:installer": "pnpm build && node scripts/build-installer.mjs"
+    "build:installer": "pnpm build && node scripts/build-installer.mjs",
+    "deploy:landing": "ssh root@139.162.197.219 \"bash ~/projects/qaytnoma/scripts/deploy-landing.sh\"",
+    "deploy:installer": "scp apps/landing/public/download/meta.json apps/landing/public/download/qaytnoma-setup.exe root@139.162.197.219:/var/www/qaytnoma.tez-agent.uz/download/"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

@@ -24,6 +24,10 @@
           <div class="brand__mark"><div class="brand__bars"></div></div>
           <span class="brand__name">qaytnoma</span>
         </div>
+        <nav class="nav">
+          <a href="#sozlash" data-t="navSetup"></a>
+          <a href="#ornatish" data-t="navInstall"></a>
+        </nav>
         <div class="lang" role="group" aria-label="Til / Язык">
           <button class="lang__btn" data-lang="uz" aria-pressed="true">UZ</button>
           <button class="lang__btn" data-lang="ru" aria-pressed="false">RU</button>
@@ -59,22 +63,65 @@
           </div>
         </div>
 
-        <div class="shot">
+        <!-- Sozlamalar oynasining HTML maketi. Skrinshot emas: real oynada
+             foydalanuvchining Spreadsheet ID si ko'rinib qolar edi. -->
+        <div class="shot" aria-hidden="true">
           <div class="shot__glow"></div>
           <div class="window">
             <div class="window__bar">
               <span class="window__dot"></span>
               <span class="window__dot"></span>
               <span class="window__dot"></span>
-              <span class="window__name">qaytnoma.exe</span>
+              <span class="window__name">Qaytnoma — sozlamalar</span>
             </div>
             <div class="window__body">
-              <img
-                src="img/qn-hero.webp"
-                alt="Qaytnoma sozlamalar oynasi"
-                width="634"
-                height="744"
-              />
+              <div class="mock">
+                <div class="mock__title">Qaytnoma sozlamalari</div>
+                <div class="mock__lead">Skanerlangan qaytarim hujjatlari Google Sheets'ga yoziladi va PDF sifatida saqlanadi.</div>
+
+                <div class="mock__group">
+                  <div class="mock__legend">Google Sheets</div>
+                  <div class="mock__field">
+                    <span class="mock__label">Spreadsheet ID</span>
+                    <span class="mock__input mock__input--secret">1A<span class="mock__dots"></span></span>
+                    <span class="mock__hint">Havoladagi /d/ va /edit orasidagi qism.</span>
+                  </div>
+                  <div class="mock__field">
+                    <span class="mock__label">Varaq nomi</span>
+                    <span class="mock__input">Sheet1</span>
+                  </div>
+                  <div class="mock__field">
+                    <span class="mock__label">Service account kaliti</span>
+                    <span class="mock__row">
+                      <span class="mock__input mock__input--focus">C:\Qaytnoma\service-account.json</span>
+                      <span class="mock__btn">Tanlash…</span>
+                    </span>
+                    <span class="mock__hint">Ushbu service account e-pochtasiga jadvalga tahrirlash huquqi berilgan bo'lishi kerak.</span>
+                  </div>
+                  <div class="mock__check">
+                    <span class="mock__box"></span>
+                    <span>Tekshirish kerak bo'lgan qatorlarni <code>⚠</code> bilan belgilash</span>
+                  </div>
+                </div>
+
+                <div class="mock__group">
+                  <div class="mock__legend">Fayllar</div>
+                  <div class="mock__field">
+                    <span class="mock__label">PDF arxivi papkasi</span>
+                    <span class="mock__row">
+                      <span class="mock__input">C:\Users\…\Documents\Invoices</span>
+                      <span class="mock__btn">Tanlash…</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div class="mock__footer">
+                  <span class="mock__status">Ulanish muvaffaqiyatli: "Qaytarimlar 2026"</span>
+                  <span class="mock__btn">Ulanishni tekshirish</span>
+                  <span class="mock__btn mock__btn--primary">Saqlash</span>
+                </div>
+              </div>
+              <div class="mock__fade"></div>
             </div>
           </div>
         </div>
@@ -107,69 +154,220 @@
       </section>
 
       <section class="section wrap">
-        <div class="shots">
-          <div class="panel">
-            <!-- Maketdagi ikkinchi rasm uyasi bo'sh qolgan. Skanerlangan
-                 hujjatlarda mijozlarning ismi va telefon raqami bo'lgani uchun
-                 bu yerga real skan qo'yilmadi — skrinshot tayyor bo'lganda
-                 `img/qn-shot-2.webp` nomi bilan qo'ying va shu blokni <img>
-                 bilan almashtiring. -->
-            <div class="panel__slot" data-t="slotEmpty"></div>
-            <div class="panel__caption" data-t="shot2"></div>
+        <div class="panel panel--flex">
+          <div class="panel__head">
+            <span class="panel__led"></span>
+            <span class="panel__file">Uzum Invoice — 15-0000163307</span>
+            <span class="panel__tag" data-t="testBadge"></span>
           </div>
-
-          <div class="panel panel--flex">
-            <div class="panel__head">
-              <span class="panel__led"></span>
-              <span class="panel__file">Uzum Invoice — 15-0000163307</span>
-              <span class="panel__tag" data-t="testBadge"></span>
-            </div>
-            <div class="panel__scroll">
-              <table class="sheet">
-                <thead>
-                  <tr>
-                    <th>Номер документа</th>
-                    <th>Ид документа</th>
-                    <th>Дата составления</th>
-                    <th>СКУ</th>
-                    <th>ШК</th>
-                    <th class="qty">Кол-во</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>163307</td>
-                    <td>15-0000163307</td>
-                    <td class="dim">2026-03-05 19:38</td>
-                    <td>NOVYGOD-CIF0001-АЛЫЙ</td>
-                    <td class="dim">1000076316479</td>
-                    <td class="qty">1</td>
-                  </tr>
-                  <tr>
-                    <td>163307</td>
-                    <td>15-0000163307</td>
-                    <td class="dim">2026-03-05 19:38</td>
-                    <td>NOVYGOD-CIF0001-БАГРОВ</td>
-                    <td class="dim">1000076317322</td>
-                    <td class="qty">6</td>
-                  </tr>
-                  <tr>
-                    <td>163307</td>
-                    <td>15-0000163307</td>
-                    <td class="dim">2026-03-05 19:38</td>
-                    <td>NOVYGOD-CIF0001-БЕЛЫЙ</td>
-                    <td class="dim">1000019726440</td>
-                    <td class="qty">8</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div class="panel__caption" data-t="shot3"></div>
+          <div class="panel__scroll">
+            <table class="sheet">
+              <thead>
+                <tr>
+                  <th>Номер документа</th>
+                  <th>Ид документа</th>
+                  <th>Дата составления</th>
+                  <th>СКУ</th>
+                  <th>ШК</th>
+                  <th class="qty">Кол-во</th>
+                  <th>⚠</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>163307</td>
+                  <td>15-0000163307</td>
+                  <td class="dim">2026-03-05 19:38</td>
+                  <td>NOVYGOD-CIF0001-АЛЫЙ</td>
+                  <td class="dim">1000076316479</td>
+                  <td class="qty">1</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>163307</td>
+                  <td>15-0000163307</td>
+                  <td class="dim">2026-03-05 19:38</td>
+                  <td>NOVYGOD-CIF0001-БАГРОВ</td>
+                  <td class="dim">1000076317322</td>
+                  <td class="qty">6</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>163307</td>
+                  <td>15-0000163307</td>
+                  <td class="dim">2026-03-05 19:38</td>
+                  <td>NOVYGOD-CIF0001-БЕЛЫЙ</td>
+                  <td class="dim">1000019726440</td>
+                  <td class="qty">8</td>
+                  <td>⚠</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
+          <div class="panel__caption" data-t="shot3"></div>
         </div>
       </section>
 
-      <section class="section wrap">
+      <!-- ============ Sozlash yo'riqnomasi ============ -->
+      <section class="section wrap" id="sozlash">
+        <div class="guide__intro">
+          <div>
+            <h2 class="section__title" data-t="gTitle"></h2>
+            <p class="install__lede" data-t="gLede"></p>
+          </div>
+          <div class="guide__need">
+            <strong data-t="gNeedTitle"></strong>
+            <ul>
+              <li data-t="gNeed1"></li>
+              <li data-t="gNeed2"></li>
+              <li data-t="gNeed3"></li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="guide">
+          <!-- 1 -->
+          <article class="gstep">
+            <div class="gstep__num">1</div>
+            <div class="gstep__body">
+              <h3 class="gstep__title" data-t="g1t"></h3>
+              <p class="gstep__text" data-t="g1b"></p>
+              <ol class="gstep__list">
+                <li data-th="g1l1"></li>
+                <li data-th="g1l2"></li>
+                <li data-th="g1l3"></li>
+                <li data-th="g1l4"></li>
+                <li data-th="g1l5"></li>
+              </ol>
+              <div class="note note--warn" data-th="g1n"></div>
+            </div>
+          </article>
+
+          <!-- 2 -->
+          <article class="gstep">
+            <div class="gstep__num">2</div>
+            <div class="gstep__body">
+              <h3 class="gstep__title" data-t="g2t"></h3>
+              <p class="gstep__text" data-t="g2b"></p>
+              <ol class="gstep__list">
+                <li data-th="g2l1"></li>
+                <li data-th="g2l2"></li>
+                <li data-th="g2l3"></li>
+              </ol>
+              <div class="urlbox">
+                <span class="urlbox__pre">https://docs.google.com/spreadsheets/d/</span><span class="urlbox__id">1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789</span><span class="urlbox__pre">/edit</span>
+              </div>
+              <div class="note" data-th="g2n"></div>
+            </div>
+          </article>
+
+          <!-- 3 -->
+          <article class="gstep">
+            <div class="gstep__num">3</div>
+            <div class="gstep__body">
+              <h3 class="gstep__title" data-t="g3t"></h3>
+              <p class="gstep__text" data-th="g3b"></p>
+              <table class="fields">
+                <tbody>
+                  <tr><th data-t="g3f1k"></th><td data-th="g3f1v"></td></tr>
+                  <tr><th data-t="g3f2k"></th><td data-th="g3f2v"></td></tr>
+                  <tr><th data-t="g3f3k"></th><td data-th="g3f3v"></td></tr>
+                  <tr><th data-t="g3f4k"></th><td data-th="g3f4v"></td></tr>
+                </tbody>
+              </table>
+              <div class="note note--ok" data-th="g3n"></div>
+            </div>
+          </article>
+
+          <!-- 4 -->
+          <article class="gstep">
+            <div class="gstep__num">4</div>
+            <div class="gstep__body">
+              <h3 class="gstep__title" data-t="g4t"></h3>
+              <table class="fields">
+                <tbody>
+                  <tr><th data-t="g4f1k"></th><td data-th="g4f1v"></td></tr>
+                  <tr><th data-t="g4f2k"></th><td data-th="g4f2v"></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <!-- 5 -->
+          <article class="gstep">
+            <div class="gstep__num">5</div>
+            <div class="gstep__body">
+              <h3 class="gstep__title" data-t="g5t"></h3>
+              <p class="gstep__text" data-t="g5b"></p>
+              <table class="fields">
+                <tbody>
+                  <tr><th data-t="g5f1k"></th><td data-th="g5f1v"></td></tr>
+                  <tr><th data-t="g5f2k"></th><td data-th="g5f2v"></td></tr>
+                  <tr><th data-t="g5f3k"></th><td data-th="g5f3v"></td></tr>
+                  <tr><th data-t="g5f4k"></th><td data-th="g5f4v"></td></tr>
+                </tbody>
+              </table>
+              <div class="note" data-th="g5n"></div>
+            </div>
+          </article>
+
+          <!-- 6 -->
+          <article class="gstep">
+            <div class="gstep__num">6</div>
+            <div class="gstep__body">
+              <h3 class="gstep__title" data-t="g6t"></h3>
+              <p class="gstep__text" data-t="g6b"></p>
+              <table class="fields">
+                <tbody>
+                  <tr><th data-t="g6f1k"></th><td data-th="g6f1v"></td></tr>
+                  <tr><th data-t="g6f2k"></th><td data-th="g6f2v"></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <!-- 7 -->
+          <article class="gstep">
+            <div class="gstep__num">7</div>
+            <div class="gstep__body">
+              <h3 class="gstep__title" data-t="g7t"></h3>
+              <ol class="gstep__list">
+                <li data-th="g7l1"></li>
+                <li data-th="g7l2"></li>
+                <li data-th="g7l3"></li>
+                <li data-th="g7l4"></li>
+              </ol>
+              <div class="menu">
+                <div class="menu__title" data-t="g7mt"></div>
+                <ul class="menu__list">
+                  <li><code>Yoqilgan</code><span data-t="g7m1"></span></li>
+                  <li><code>Skanerlash</code><span data-t="g7m2"></span></li>
+                  <li><code>Katalogni yangilash</code><span data-t="g7m3"></span></li>
+                  <li><code>Hujjatlar papkasi</code><span data-t="g7m4"></span></li>
+                  <li><code>Google Sheets</code><span data-t="g7m5"></span></li>
+                  <li><code>Sozlamalar…</code><span data-t="g7m6"></span></li>
+                  <li><code>Ishga tushganda ochilsin</code><span data-t="g7m7"></span></li>
+                  <li><code>Chiqish</code><span data-t="g7m8"></span></li>
+                </ul>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div class="faq">
+          <h3 class="faq__title" data-t="faqTitle"></h3>
+          <dl class="faq__list">
+            <dt data-th="q1"></dt><dd data-th="a1"></dd>
+            <dt data-th="q2"></dt><dd data-th="a2"></dd>
+            <dt data-th="q3"></dt><dd data-th="a3"></dd>
+            <dt data-th="q4"></dt><dd data-th="a4"></dd>
+            <dt data-th="q5"></dt><dd data-th="a5"></dd>
+            <dt data-th="q6"></dt><dd data-th="a6"></dd>
+          </dl>
+        </div>
+      </section>
+
+      <section class="section wrap" id="ornatish">
         <div class="install">
           <div>
             <h2 class="section__title" data-t="instTitle"></h2>
@@ -202,7 +400,7 @@
               <div class="step__num">4</div>
               <div>
                 <h3 class="step__title" data-t="s4t"></h3>
-                <p class="step__body" data-t="s4b"></p>
+                <p class="step__body" data-th="s4b"></p>
               </div>
             </div>
           </div>
