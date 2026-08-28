@@ -221,7 +221,7 @@ async function process_(
     if (doc.pdfPath) console.log(`  PDF: ${doc.pdfPath}`);
     for (const issue of doc.issues) console.log(`  [${issue.severity}] ${issue.message}`);
     for (const item of doc.items) {
-      const marks = item.issues.length ? ' ⚠' : '';
+      const marks = item.duplicate ? ' ⟲ takror' : item.issues.length ? ' ⚠' : '';
       console.log(
         `  ${String(item.rowNumber).padStart(3)}  ${item.itemBarcode}  ${String(item.quantity).padStart(3)}  ${item.sku ?? '—'}${marks}`,
       );
@@ -230,6 +230,7 @@ async function process_(
 
   console.log(
     `\n${result.documents.length} hujjat, ${result.rowsAppended} qator yozildi, ` +
+      (result.rowsSkipped ? `${result.rowsSkipped} ta takror o'tkazib yuborildi, ` : '') +
       `${result.flaggedRows} ta belgilandi. ` +
       `SKU: ${result.skuResolved} ta ishonchli manbadan, ${result.skuFromOcr} ta OCR dan ` +
       `(katalogda ${result.catalogueEntries} yozuv). ${(result.elapsedMs / 1000).toFixed(1)} s`,
@@ -273,7 +274,11 @@ function logProgress(event: ProgressEvent): void {
       console.log(`  PDF: ${event.path}`);
       break;
     case 'sheets':
-      console.log(`  Sheets: ${event.rows} qator (${event.flagged} belgilangan)`);
+      console.log(
+        `  Sheets: ${event.rows} qator (${event.flagged} belgilangan` +
+          (event.skipped ? `, ${event.skipped} takror o'tkazib yuborildi` : '') +
+          ')',
+      );
       break;
     case 'warning':
       console.log(`  DIQQAT: ${event.message}`);

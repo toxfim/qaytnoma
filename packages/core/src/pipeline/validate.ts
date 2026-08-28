@@ -181,6 +181,8 @@ export function validateDocument(doc: InvoiceDocument, opts: ValidateOptions = {
 export function rowNeedsReview(doc: InvoiceDocument, index: number): boolean {
   const item = doc.items[index];
   if (!item) return true;
+  // Takror qator yozilmaydi — tekshiruvga ham tushmaydi.
+  if (item.duplicate) return false;
   // Hujjat darajasidagi xatolar barcha qatorlarga tegishli.
   return item.issues.length > 0 || doc.issues.some((i) => i.severity === 'error');
 }

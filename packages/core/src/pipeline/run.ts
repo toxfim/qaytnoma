@@ -11,6 +11,7 @@ import { OcrEngine } from '../ocr/engine.js';
 import { extractPage, type PageExtraction } from './extract-page.js';
 import { groupIntoDocuments } from './group.js';
 import { validateDocument } from './validate.js';
+import { markDuplicates } from './dedupe.js';
 import { SkuDictionary } from '../store/sku-dictionary.js';
 import { SkuCatalogue } from '../store/sku-catalogue.js';
 import { SkuResolver } from '../store/sku-resolver.js';
@@ -61,7 +62,7 @@ export type ProgressEvent =
   | { type: 'page'; index: number; total: number; path: string }
   | { type: 'grouped'; documents: number }
   | { type: 'pdf'; docId: string; path: string }
-  | { type: 'sheets'; rows: number; flagged: number }
+  | { type: 'sheets'; rows: number; flagged: number; skipped: number }
   | { type: 'warning'; message: string };
 
 export interface RunResult {
@@ -71,6 +72,11 @@ export interface RunResult {
   rowsAppended: number;
   /** `⚠` bilan belgilangan qatorlar. */
   flaggedRows: number;
+  /**
+   * `Ид документа + ШК` juftligi allaqachon yozilgan bo'lgani uchun
+   * o'tkazib yuborilgan qatorlar (takroriy skan).
+   */
+  rowsSkipped: number;
   /** SKU si katalogdan yoki tasdiqlangan lug'atdan olingan qatorlar. */
   skuResolved: number;
   /** SKU si faqat OCR dan olingan qatorlar. */
@@ -153,11 +159,15 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     validateDocument(doc, { knownDocIds, skuFromDictionary: trustedBarcodes });
   }
 
-  // Sarlavha tekshiruvi (tarmoq) PDF yozish (disk) bilan bir vaqtda ketadi.
-  const headersReady = opts.sheets?.ensureHeaders().then(
-    () => null,
-    (err: Error) => err,
-  );
+  // Sarlavha tekshiruvi va mavjud `Ид + ШК` kalitlarini o'qish (tarmoq)
+  // PDF yozish (disk) bilan bir vaqtda ketadi.
+  const sheets = opts.sheets;
+  const existingKeys = sheets
+    ? sheets
+        .ensureHeaders()
+        .then(() => sheets.readRowKeys())
+        .catch((err: Error) => err)
+    : undefined;
 
   // --- PDF ---
   const pagesByIndex = new Map(extracted.map((p) => [p.pageIndex, p]));
@@ -182,17 +192,36 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     }
   }
 
+  // --- Takror qatorlar: Ид + ШК allaqachon yozilgan bo'lsa tashlab ketiladi ---
+  // Manba — Sheets'ning o'zi; Sheets o'chiq bo'lsa lokal indeks.
+  let rowsSkipped = 0;
+  let sheetsError: Error | undefined;
+  const existing = existingKeys ? await existingKeys : index.rowKeys();
+  if (existing instanceof Error) {
+    sheetsError = existing;
+  } else {
+    const dup = markDuplicates(documents, existing);
+    rowsSkipped = dup.skipped;
+    if (dup.skipped > 0) {
+      const detail = [...dup.byDocument].map(([id, n]) => `${id}: ${n}`).join(', ');
+      warn(`${dup.skipped} ta qator allaqachon yozilgan — o'tkazib yuborildi (${detail})`);
+    }
+  }
+  const flaggedRows = countFlagged(documents);
+
   // --- Google Sheets ---
   let rowsAppended = 0;
-  let flaggedRows = countFlagged(documents);
-  if (opts.sheets) {
+  if (sheets) {
     try {
-      const headerError = await headersReady;
-      if (headerError) throw headerError;
-      const res = await opts.sheets.appendDocuments(documents);
+      if (sheetsError) throw sheetsError;
+      const res = await sheets.appendDocuments(documents);
       rowsAppended = res.rowsAppended;
-      flaggedRows = res.flaggedRows;
-      opts.onProgress?.({ type: 'sheets', rows: res.rowsAppended, flagged: res.flaggedRows });
+      opts.onProgress?.({
+        type: 'sheets',
+        rows: res.rowsAppended,
+        flagged: res.flaggedRows,
+        skipped: res.rowsSkipped,
+      });
     } catch (err) {
       warn(`Google Sheets ga yozib bo'lmadi: ${(err as Error).message}`);
     }
@@ -210,6 +239,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     orphanPages: orphanPages.length,
     rowsAppended,
     flaggedRows,
+    rowsSkipped,
     skuResolved: trustedBarcodes.size,
     skuFromOcr,
     catalogueEntries: catalogue.size,
@@ -272,6 +302,7 @@ function countFlagged(documents: readonly InvoiceDocument[]): number {
   for (const doc of documents) {
     const docHasError = doc.issues.some((i) => i.severity === 'error');
     for (const item of doc.items) {
+      if (item.duplicate) continue; // yozilmaydi — belgilanmaydi ham
       if (docHasError || item.issues.length > 0) count++;
     }
   }

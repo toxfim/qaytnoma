@@ -54,6 +54,7 @@ export type IssueCode =
   | 'TOTAL_QTY_MISMATCH'
   | 'TOTALS_MISSING'
   | 'DUPLICATE_DOC'
+  | 'DUPLICATE_ROW'
   | 'COLUMN_DETECTION_FALLBACK';
 
 export type IssueSeverity = 'error' | 'warn';
@@ -84,6 +85,11 @@ export interface LineItem {
   /** Qator qaysi sahifada topilgani (to'plamdagi indeks). */
   pageIndex: number;
   issues: Issue[];
+  /**
+   * `Ид документа + ШК` juftligi allaqachon yozilgan — qator Sheets'ga
+   * yozilmaydi, faqat `_log` da qayd etiladi (`pipeline/dedupe.ts`).
+   */
+  duplicate?: boolean;
 }
 
 /** `Итого` qatoridan olingan jami qiymatlar. */
