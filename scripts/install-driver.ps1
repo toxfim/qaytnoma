@@ -42,7 +42,11 @@ param(
   # Rasmiy "Drivers and Utilities Combo Package Installer" (DS-530 II).
   [string] $Url = 'https://ftp.epson.com/drivers/DS530II_Lite_AM.exe',
   # Imzo egasi shu matnni o'z ichiga olishi shart.
-  [string] $Publisher = 'EPSON'
+  [string] $Publisher = 'EPSON',
+  # Qidiriladigan model (regex). Drayver bor-yo'qligi AYNAN shu model bo'yicha
+  # tekshiriladi: «Epson Scan» kabi umumiy nom boshqa Epson qurilmasidan ham
+  # qolgan bo'lishi mumkin va u bizning skanerimizga yaramaydi.
+  [string] $Model = 'DS-?530'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -79,10 +83,41 @@ function Get-WiaScanners {
   return $names.ToArray()
 }
 
-# --- O'rnatilgan Epson dasturlari ---
-# Skaner uzilgan bo'lsa ham drayver borligini shu bilan bilamiz. Reyestrning
-# uchala shoxi ham ko'riladi: 64-bit, 32-bit va joriy foydalanuvchi.
-function Get-EpsonDriverEntries {
+# --- O'rnatilgan WIA drayveri ---
+#
+# ENG ISHONCHLI BELGI. Ilova skanerni `WIA.DeviceManager` orqali topadi, u esa
+# Image qurilma sinfida ro'yxatdan o'tgan drayverlarni ko'rsatadi — ya'ni bu
+# yozuv borligi «ilova ishlay oladi» degani. Skaner rozetkadan uzilgan bo'lsa
+# ham yozuv joyida qoladi, shuning uchun qurilmani ulamasdan tekshirish mumkin.
+#
+# O'lchandi: EPSON DS-530II, ProviderName = EPSON, InfPath = oem22.inf.
+# Kalit oddiy foydalanuvchi huquqi bilan o'qiladi, administrator kerak emas.
+function Get-WiaDriverEntries {
+  $class = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{6bdd1fc6-810f-11d0-bec7-08002be2092f}'
+  $found = New-Object System.Collections.Generic.List[string]
+  try {
+    foreach ($key in Get-ChildItem $class -ErrorAction SilentlyContinue) {
+      $p = $null
+      try { $p = Get-ItemProperty $key.PSPath -ErrorAction SilentlyContinue } catch { continue }
+      if ($null -eq $p) { continue }
+      $name = [string]$p.FriendlyName
+      if ($name -eq '') { $name = [string]$p.DeviceDesc }
+      if ($name -eq '') { continue }
+      if ($name -match $Model) { $found.Add($name) | Out-Null }
+    }
+  } catch {
+    Write-Log ('Image sinfini o`qib bo`lmadi: ' + $_.Exception.Message)
+  }
+  return ($found | Select-Object -Unique)
+}
+
+# --- O'rnatilgan dasturlar (ikkilamchi belgi) ---
+# Drayver yozuvi topilmaganda ham model nomi o'rnatilgan dasturlar ro'yxatida
+# uchrashi mumkin. ATAYIN faqat model bo'yicha qidiramiz: ilgari bu yerda
+# umumiy 'Epson Scan' bor edi va boshqa Epson qurilmasi uchun o'rnatilgan
+# dastur ham «drayver bor» deb hisoblanardi — natijada kerakli drayver taklif
+# qilinmay, ilova skanerlay olmay qolardi.
+function Get-ModelPrograms {
   $roots = @(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
     'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
@@ -94,27 +129,37 @@ function Get-EpsonDriverEntries {
       foreach ($item in Get-ItemProperty $root -ErrorAction SilentlyContinue) {
         $name = [string]$item.DisplayName
         if ($name -eq '') { continue }
-        if ($name -match 'Epson Scan|EPSON Scan|DS-530|DS530') { $found.Add($name) | Out-Null }
+        if ($name -match $Model) { $found.Add($name) | Out-Null }
       }
     } catch { }
   }
   return ($found | Select-Object -Unique)
 }
 
-$scanners = Get-WiaScanners
-$entries  = @(Get-EpsonDriverEntries)
-$present  = ($scanners.Count -gt 0) -or ($entries.Count -gt 0)
+$scanners = @(Get-WiaScanners)
+$drivers  = @(Get-WiaDriverEntries)
+$entries  = @(Get-ModelPrograms)
+$present  = ($scanners.Count -gt 0) -or ($drivers.Count -gt 0) -or ($entries.Count -gt 0)
 
-Write-Log ('ulangan skanerlar: ' + $(if ($scanners.Count) { $scanners -join ', ' } else { 'yo`q' }))
-Write-Log ('o`rnatilgan Epson dasturlari: ' + $(if ($entries.Count) { $entries -join ', ' } else { 'yo`q' }))
+$none = 'yo`q'
+Write-Log ('ulangan skanerlar: ' + $(if ($scanners.Count) { $scanners -join ', ' } else { $none }))
+Write-Log ('WIA drayveri: '     + $(if ($drivers.Count)  { $drivers  -join ', ' } else { $none }))
+Write-Log ('model dasturlari: ' + $(if ($entries.Count)  { $entries  -join ', ' } else { $none }))
+
+$state = @{
+  scanners = [string[]]$scanners
+  drivers  = [string[]]$drivers
+  entries  = [string[]]$entries
+  model    = $Model
+}
 
 if ($CheckOnly) {
-  Emit-Json @{ ok = $true; present = $present; scanners = $scanners; entries = $entries }
+  Emit-Json ($state + @{ ok = $true; present = $present })
   if ($present) { exit 0 } else { exit 1 }
 }
 
 if ($present -and -not $Force) {
-  Emit-Json @{ ok = $true; skipped = $true; reason = 'ALREADY_PRESENT'; scanners = $scanners; entries = $entries }
+  Emit-Json ($state + @{ ok = $true; skipped = $true; reason = 'ALREADY_PRESENT' })
   exit 0
 }
 
@@ -171,6 +216,13 @@ try {
   exit 5
 }
 
-$after = Get-WiaScanners
-Emit-Json @{ ok = $true; installed = $true; scanners = $after }
+# Natijani qayd etamiz, lekin xato deb hisoblamaymiz: Image sinfidagi yozuv
+# qurilma ulanib, Windows unga drayverni bog'laganda paydo bo'ladi — skaner
+# rozetkaga ulanmagan bo'lsa o'rnatishdan keyin ham darhol ko'rinmasligi mumkin.
+Emit-Json @{
+  ok        = $true
+  installed = $true
+  scanners  = [string[]]@(Get-WiaScanners)
+  drivers   = [string[]]@(Get-WiaDriverEntries)
+}
 exit 0
