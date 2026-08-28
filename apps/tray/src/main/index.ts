@@ -21,6 +21,7 @@ import { Store, type AppState, type Status } from './state.js';
 import { JobRunner } from './jobs.js';
 import { HotFolderWatcher } from './watcher.js';
 import { openSettingsWindow } from './settings-window.js';
+import { showErrorDialog } from './error-dialog.js';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
 const ASSETS = join(ROOT, 'assets');
@@ -169,7 +170,22 @@ function buildMenu(state: AppState): MenuItemConstructorOptions[] {
 
   if (lastRun) {
     items.push({ type: 'separator' });
-    items.push({ label: summarize(lastRun), enabled: false });
+    // Xato bo'lsa qator bosiladigan bo'ladi: menyudagi matn 60 belgida
+    // kesiladi, modal esa sababni to'liq ko'rsatadi va nusxalab beradi.
+    const error = lastRun.error;
+    items.push({
+      label: error ? `${summarize(lastRun)} — batafsil` : summarize(lastRun),
+      enabled: Boolean(error),
+      click: error
+        ? () =>
+            void showErrorDialog(
+              lastRun.documents > 0
+                ? 'Oxirgi skanerlashdagi ogohlantirish'
+                : 'Oxirgi ish bajarilmadi',
+              error,
+            )
+        : undefined,
+    });
   }
 
   items.push(

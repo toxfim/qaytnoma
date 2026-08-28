@@ -23,6 +23,7 @@ import {
 } from '@barcodeer/core';
 import { scanStream } from '@barcodeer/scanner';
 import type { Store } from './state.js';
+import { showErrorDialog } from './error-dialog.js';
 
 export class JobRunner {
   #running = false;
@@ -266,7 +267,9 @@ export class JobRunner {
         error: message,
       },
     });
-    notify('Skanerlash bajarilmadi', message, null);
+    // Bildirishnoma emas, modal: xato sababi ko'rinmay qolmasligi kerak
+    // (`error-dialog.ts` da nega — batafsil).
+    void showErrorDialog('Ish bajarilmadi', message);
   }
 }
 
