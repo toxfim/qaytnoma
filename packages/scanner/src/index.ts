@@ -17,8 +17,9 @@
  * kattasiga yaqin bo'ladi.
  */
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 
 /** Skanerlashda rang SHART: ko'k qo'lyozmani ajratish uchun RGB kerak. */
 export const WIA_DATATYPE_COLOR = 3;
@@ -49,7 +50,7 @@ export interface ScanSuccess {
 
 export interface ScanFailure {
   ok: false;
-  /** `NO_DEVICE` | `NO_PAPER` | `SCAN_FAILED` | `TIMEOUT` | `SPAWN_FAILED` */
+  /** `NO_DEVICE` | `NO_PAPER` | `SCAN_FAILED` | `SCRIPT_MISSING` | `TIMEOUT` | `SPAWN_FAILED` */
   code: string;
   error: string;
   pages: string[];
@@ -71,9 +72,19 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  *
  * Manba daraxtida skript `src/` yonidagi `scripts/` da, qurilgandan keyin esa
  * `dist/` yonida bo'ladi — ikkala holatni ham qamraymiz.
+ *
+ * PAKETLANGAN ILOVA — ASAR TUZOG'I: Electron ichida bu yo'l `app.asar`
+ * ichiga tushadi. Node uchun u oddiy papkadek ko'rinadi (fs shim), ammo
+ * `powershell.exe` — tashqi jarayon — arxiv ichini umuman ocholmaydi va
+ * "The argument ... to the -File parameter does not exist" deb tugaydi.
+ * Skaner umuman qo'zg'almaydi. Shuning uchun skript `asarUnpack` bilan
+ * `app.asar.unpacked` ga chiqariladi (`electron-builder.yml`) va yo'l shu
+ * papkaga yo'naltiriladi. Ikkalasi birga bo'lishi shart: faqat bittasi
+ * qilinsa, paketlangan ilovada skanerlash ishlamaydi.
  */
 function scriptPath(): string {
-  return resolve(HERE, '..', 'scripts', 'wia-scan.ps1');
+  const path = resolve(HERE, '..', 'scripts', 'wia-scan.ps1');
+  return path.split(`${sep}app.asar${sep}`).join(`${sep}app.asar.unpacked${sep}`);
 }
 
 /** Mavjud WIA skanerlar ro'yxati. */
@@ -188,9 +199,22 @@ function runScript(
   onPage: (path: string) => void,
 ): Promise<RunOk | RunErr> {
   return new Promise((resolvePromise) => {
+    // Skript yo'qligini o'zimiz aniqlaymiz: aks holda PowerShell ning
+    // ingliz tilidagi "-File parameter does not exist" xabari foydalanuvchiga
+    // "skanerlash bajarilmadi" deb ko'rsatiladi va sabab noma'lum qoladi.
+    const script = scriptPath();
+    if (!existsSync(script)) {
+      resolvePromise({
+        ok: false,
+        code: 'SCRIPT_MISSING',
+        error: `Skanerlash skripti topilmadi: ${script}`,
+      });
+      return;
+    }
+
     const child = spawn(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath(), ...args],
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, ...args],
       { windowsHide: true },
     );
 

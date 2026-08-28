@@ -258,8 +258,9 @@ function summarize(run: NonNullable<AppState['lastRun']>): string {
     minute: '2-digit',
   });
   if (run.error && run.documents === 0) return `${time} — xato: ${truncate(run.error, 60)}`;
+  const skipped = run.skipped ? `, ${run.skipped} takror` : '';
   const flagged = run.flagged ? `, ${run.flagged} ⚠` : '';
-  return `${time} — ${run.documents} hujjat, ${run.rows} qator${flagged}`;
+  return `${time} — ${run.documents} hujjat, ${run.rows} qator${skipped}${flagged}`;
 }
 
 function truncate(text: string, max: number): string {

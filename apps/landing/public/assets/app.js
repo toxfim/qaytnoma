@@ -130,13 +130,15 @@
       a6: "<code>%APPDATA%\\barcodeer\\config.json</code> faylida. Ilovani boshqa kompyuterga ko'chirganda shu faylni va service account <code>.json</code> ini olib o'ting.",
 
       instTitle: "O'rnatish",
-      instLede: "To'rt qadam, taxminan bir daqiqa. Administrator huquqi talab qilinmaydi.",
+      instLede:
+        "To'rt qadam, taxminan bir daqiqa. Ilovaning o'zi uchun administrator huquqi kerak emas — u faqat skaner drayveri o'rnatilsa so'raladi.",
       s1t: 'Faylni yuklab oling',
       s1b: 'qaytnoma-setup.exe faylini yuklab oling va ishga tushiring.',
       s2t: 'Windows ogohlantirsa',
       s2b: "«Ko'proq ma'lumot» → «Baribir ishga tushirish» ni bosing. Bu imzosiz ilovalar uchun oddiy holat.",
       s3t: 'Skanerni ulang',
-      s3b: "Skaner tizimga ulangan bo'lsa, ilova uni o'zi topadi va ro'yxatda ko'rsatadi.",
+      s3b:
+        "Skanerni USB orqali ulang. Drayver topilmasa, o'rnatgich uni Epson saytidan yuklab olib o'rnatishni taklif qiladi.",
       s4t: 'Sozlang',
       s4b: "Birinchi ochilishda Sozlamalar oynasi o'zi chiqadi. Uni <a href=\"#sozlash\">yo'riqnoma</a> bo'yicha to'ldiring — Google kaliti, jadval ID si va ruxsat. Shundan keyin ilova o'zi ishlaydi.",
       foot: 'Windows 10/11 · 64-bit · Versiya 1.0.0',
@@ -254,13 +256,15 @@
       a6: 'В файле <code>%APPDATA%\\barcodeer\\config.json</code>. При переносе на другой компьютер возьмите этот файл и <code>.json</code> сервисного аккаунта.',
 
       instTitle: 'Установка',
-      instLede: 'Четыре шага, около минуты. Права администратора не требуются.',
+      instLede:
+        'Четыре шага, около минуты. Для самого приложения права администратора не нужны — они запрашиваются только при установке драйвера сканера.',
       s1t: 'Скачайте файл',
       s1b: 'Скачайте qaytnoma-setup.exe и запустите его.',
       s2t: 'Если Windows предупредит',
       s2b: 'Нажмите «Подробнее» → «Выполнить в любом случае». Для неподписанных приложений это обычное дело.',
       s3t: 'Подключите сканер',
-      s3b: 'Если сканер подключён к системе, приложение найдёт его само и покажет в списке.',
+      s3b:
+        'Подключите сканер по USB. Если драйвер не найден, установщик предложит скачать и установить его с сайта Epson.',
       s4t: 'Настройте',
       s4b: 'При первом запуске окно настроек откроется само. Заполните его по <a href="#sozlash">инструкции</a> — ключ Google, ID таблицы и доступ. Дальше приложение работает само.',
       foot: 'Windows 10/11 · 64-bit · Версия 1.0.0',

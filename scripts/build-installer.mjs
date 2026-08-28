@@ -27,6 +27,8 @@ const STAGE = join(ROOT, 'build', 'app');
 const PKGS = join(ROOT, 'build', 'pkgs');
 /** electron-builder chiqishi — oraliq fayllar bilan birga. */
 const DIST = join(ROOT, 'build', 'dist');
+/** `directories.buildResources` — NSIS qo'shimchalari va ikonka shu yerdan olinadi. */
+const RES = join(ROOT, 'build', 'resources');
 /** Landing sahifasining yuklash papkasi — faqat tayyor `.exe` shu yerga tushadi. */
 const OUT = join(ROOT, 'apps', 'landing', 'public', 'download');
 const INSTALLER = 'qaytnoma-setup.exe';
@@ -174,6 +176,23 @@ function ensureTessdata() {
 }
 
 /**
+ * NSIS qo'shimchalarini `build/resources` ga ko'chiradi.
+ *
+ * electron-builder `installer.nsh` ni buildResources papkasidan O'ZI topib
+ * qo'shadi, sozlamada ko'rsatish shart emas. Lekin `build/` git'da
+ * kuzatilmaydi, shuning uchun asl nusxalar `scripts/` da turadi va har
+ * yig'ishda shu yerga ko'chiriladi — aks holda toza klonda drayver bosqichi
+ * jimgina yo'qolardi.
+ */
+function stageInstallerScripts() {
+  mkdirSync(RES, { recursive: true });
+  for (const file of ['installer.nsh', 'install-driver.ps1']) {
+    cpSync(join(ROOT, 'scripts', file), join(RES, file));
+  }
+  log('NSIS qo`shimchalari ko`chirildi (installer.nsh, install-driver.ps1)');
+}
+
+/**
  * Electron versiyasi.
  *
  * electron-builder uni odatda dastur papkasidagi `node_modules/electron` dan
@@ -207,6 +226,38 @@ function buildInstaller() {
   );
 }
 
+/**
+ * Skanerlash skripti arxivdan tashqarida ekanini tekshiradi.
+ *
+ * NEGA TEKSHIRUV KERAK: `wia-scan.ps1` ni `powershell.exe` o'qiydi, Node emas.
+ * U `app.asar` ichida qolib ketsa, ilova muammosiz ishga tushadi, sozlamalar
+ * ochiladi, tray ikonkasi yonadi — faqat "Skanerlash" bosilganda skaner
+ * umuman qo'zg'almaydi. Ishlab chiqishda (`npx electron .`) hech qachon
+ * ko'rinmaydi, chunki u yerda fayl oddiy papkada yotadi. Bu xato bir marta
+ * foydalanuvchiga yetib borgan, shuning uchun yig'ish uni o'zi ushlaydi.
+ */
+function verifyUnpacked() {
+  const script = join(
+    DIST,
+    'win-unpacked',
+    'resources',
+    'app.asar.unpacked',
+    'node_modules',
+    '@barcodeer',
+    'scanner',
+    'scripts',
+    'wia-scan.ps1',
+  );
+  if (!existsSync(script)) {
+    throw new Error(
+      `wia-scan.ps1 arxivdan chiqarilmagan: ${script}\n` +
+        "electron-builder.yml dagi `asarUnpack` ro'yxatini tekshiring — " +
+        'skript asar ichida qolsa paketlangan ilovada skanerlash ishlamaydi.',
+    );
+  }
+  log('tekshirildi: wia-scan.ps1 app.asar.unpacked da');
+}
+
 /** Tayyor o'rnatgichni landing sahifasiga ko'chiradi. */
 function publish() {
   const built = join(DIST, INSTALLER);
@@ -232,7 +283,9 @@ function publish() {
 }
 
 stageWorkspacePackages();
+stageInstallerScripts();
 const needsInstall = stage();
 installDependencies(needsInstall);
 buildInstaller();
+verifyUnpacked();
 publish();

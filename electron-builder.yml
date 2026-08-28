@@ -32,12 +32,21 @@ buildDependenciesFromSource: false
 
 # Arxiv ichidan chiqarilishi kerak bo'lganlar: native `.node` fayllar va
 # WASM/til resurslari asar ichida ishlamaydi.
+#
+# `wia-scan.ps1` — ALOHIDA SABAB: uni Node emas, `powershell.exe` o'qiydi.
+# Tashqi jarayon uchun `app.asar` oddiy fayl, papka emas; arxiv ichidagi
+# skript yo'li bilan chaqirilsa PowerShell "-File ... does not exist" deb
+# darhol to'xtaydi va skaner umuman qo'zg'almaydi. Bu paketlangan ilovada
+# skanerlashni butunlay ishlamas qilgan edi. `scriptPath()` (packages/
+# scanner/src/index.ts) yo'lni shu `app.asar.unpacked` ga yo'naltiradi —
+# ikkalasi juft ishlaydi.
 asar: true
 asarUnpack:
   - '**/node_modules/sharp/**'
   - '**/node_modules/@img/**'
   - '**/node_modules/tesseract.js-core/**'
   - '**/node_modules/zxing-wasm/**'
+  - '**/node_modules/@barcodeer/scanner/scripts/**'
 
 win:
   target:

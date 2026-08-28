@@ -82,20 +82,31 @@ export class JobRunner {
         deviceName: config.scannerName,
       });
 
-      const [scan, result] = await Promise.all([
-        stream.result,
-        this.#process(config, stream.pages),
-      ]);
+      // Quvur skanerlash bilan parallel ishlaydi, ammo skanerlash xatosini
+      // uni KUTMASDAN ko'rsatamiz. Quvur ishni Uzum katalogini yuklashdan
+      // boshlaydi (~23 000 qator, tarmoq), shuning uchun skaner umuman
+      // qo'zg'almagan holatda ham ikonka yana o'nlab soniya "bajarilmoqda"
+      // holatida turardi — foydalanuvchi sababni ko'rmay qolardi.
+      const processing = this.#process(config, stream.pages).then(
+        (value) => ({ value, error: null as Error | null }),
+        (error: Error) => ({ value: null, error }),
+      );
 
+      const scan = await stream.result;
       if (!scan.ok) {
         this.#fail(scanErrorMessage(scan.code, scan.error));
+        await processing;
         return;
       }
       if (scan.pages.length === 0) {
         this.#fail('Skanerda qog`oz topilmadi');
+        await processing;
         return;
       }
-      this.#succeed(result);
+
+      const outcome = await processing;
+      if (!outcome.value) throw outcome.error ?? new Error('Qayta ishlash natijasiz tugadi');
+      this.#succeed(outcome.value);
     } catch (err) {
       this.#fail((err as Error).message);
     } finally {
@@ -142,6 +153,7 @@ export class JobRunner {
           documents: 0,
           rows: 0,
           flagged: 0,
+          skipped: 0,
           error: null,
         },
       });
@@ -223,6 +235,7 @@ export class JobRunner {
       documents: result.documents.length,
       rows: result.rowsAppended,
       flagged: result.flaggedRows,
+      skipped: result.rowsSkipped,
       error: result.warnings[0] ?? null,
     };
     this.store.update({
@@ -233,6 +246,7 @@ export class JobRunner {
 
     const body =
       `${result.documents.length} hujjat, ${result.rowsAppended} qator yozildi` +
+      (result.rowsSkipped ? `, ${result.rowsSkipped} ta takror o'tkazib yuborildi` : '') +
       (result.flaggedRows ? `, ${result.flaggedRows} ta tekshiruvga` : '') +
       (result.warnings.length ? `\n${result.warnings[0]}` : '');
 
@@ -248,6 +262,7 @@ export class JobRunner {
         documents: 0,
         rows: 0,
         flagged: 0,
+        skipped: 0,
         error: message,
       },
     });
@@ -288,7 +303,7 @@ function describe(event: ProgressEvent): string {
     case 'pdf':
       return `PDF saqlandi: ${event.docId}`;
     case 'sheets':
-      return `Sheets: ${event.rows} qator`;
+      return `Sheets: ${event.rows} qator` + (event.skipped ? `, ${event.skipped} takror o'tkazildi` : '');
     case 'warning':
       return event.message;
   }
@@ -297,7 +312,9 @@ function describe(event: ProgressEvent): string {
 function scanErrorMessage(code: string, error: string): string {
   switch (code) {
     case 'NO_DEVICE':
-      return 'Skaner topilmadi — USB ulanishini tekshiring';
+      return 'Skaner topilmadi — USB ulanishini va WIA drayverini tekshiring';
+    case 'SCRIPT_MISSING':
+      return `Dastur to'liq o'rnatilmagan (${error}) — o'rnatgichni qayta yuklab, qayta o'rnating`;
     case 'NO_PAPER':
       return 'Avtomatik uzatgichda qog`oz yo`q';
     case 'TIMEOUT':

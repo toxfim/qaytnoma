@@ -30,6 +30,17 @@ pnpm build:installer                     # -> apps/landing/public/download/qaytn
 pnpm --filter @barcodeer/landing dev     # serve the download page on :4173
 ```
 
+The installer offers to install the **Epson scanner driver** when none is found
+(`scripts/installer.nsh` → `scripts/install-driver.ps1`). It checks first —
+connected WIA scanners plus the uninstall registry — and stays silent when a
+driver is already there. Nothing is bundled: the official combo installer is
+downloaded from `ftp.epson.com`, its Authenticode signature is verified to be
+Seiko Epson's *before* it runs (a hash pin would break on every Epson update),
+and it is launched with `RunAs`, so that step alone raises UAC. Both files are
+tracked in `scripts/` and copied into `build/resources/` at build time —
+electron-builder auto-includes `installer.nsh` from `buildResources`, and
+`build/` is gitignored.
+
 The installer is built from a self-contained staging tree (`build/app`) because
 pnpm gives each workspace package its own `node_modules` and electron-builder
 needs one flat tree — see `scripts/build-installer.mjs` for the details and the
@@ -160,6 +171,8 @@ longer the mechanism for *finding* rows.
 - **Scan at 300 DPI, not 600.** Measured identical accuracy; scan and processing both ~2x faster. `WORK_WIDTH` (2481 px) already is 300 DPI, so 600 DPI pixels were never used.
 - **Skip SKU OCR when the catalogue knows the barcode** (`ExtractOptions.knownSku`) — it was the single largest per-row cost (2 Tesseract passes) for a value that gets overwritten anyway.
 - **Scanner and pipeline overlap** (`scanStream` + `AsyncIterable` pages in `runPipeline`). Per-page WIA events come from `wia-scan.ps1` stdout; never make `runPipeline` wait for the whole batch.
+- **A file an EXTERNAL process reads must live outside `app.asar`.** `wia-scan.ps1` is opened by `powershell.exe`, not by Node, and to any non-Electron process `app.asar` is a single file, not a directory. Packed inside it, the installed app started fine, showed its tray icon and settings, and then simply never moved the scanner — while `npx electron .` worked, because there the script is an ordinary file. It shipped to a user that way. The fix is two halves that must stay together: `asarUnpack` in `electron-builder.yml` and the `app.asar` → `app.asar.unpacked` rewrite in `scriptPath()` (`packages/scanner/src/index.ts`). `build-installer.mjs` now fails the build if the `.ps1` is not in `app.asar.unpacked`.
+- **Report the scan error without waiting for the pipeline.** `runPipeline` opens by syncing the ~23 000-row catalogue over the network, so a `Promise.all` of scan + pipeline left the tray amber for another half-minute after the scanner had already failed, hiding the cause.
 
 **Known pitfalls to design around:** scanners write incrementally, so ingesting mid-write corrupts files; higher DPI is *not* monotonically better for Code128 (test 200/300/400 empirically); ZXing has narrow tilt tolerance on scans — keep a zbar/rotate/upscale fallback; Tesseract PSM 3 returns "Empty page" on single-cell crops; if the hot folder is an SMB share, poll rather than rely on FS events.
 
@@ -172,6 +185,20 @@ longer the mechanism for *finding* rows.
 - Σ quantities == `Итого` quantity; Σ (price × qty) == `Итого` sum.
 
 Route **per field**, not per document — only failing cells go to review.
+
+## Row-level dedupe (`pipeline/dedupe.ts`)
+
+The unique key is **`Ид документа + ШК`** — equivalent to `Ид + СКУ` since
+СКУ is looked up from ШК, but ШК decodes 36/36 while an OCR'd СКУ can differ
+between two scans of the same row. Before appending, `SheetsWriter.readRowKeys()`
+reads every existing key from the sheet itself (one `values.get`, ~1 s);
+matching rows are marked `LineItem.duplicate`, left out of the main sheet,
+logged as `DUPLICATE_ROW` in `_log` and reported as `rowsSkipped` + a warning.
+**Sheets — not the local index — is the source of truth**, so a row deleted
+by hand is re-added on the next scan; `documents.jsonl` stores barcodes only
+for the `--no-sheets` path. A document is never checked against itself (a
+repeated ШК inside one document keeps both rows), but the second copy of a
+document inside the same batch is caught.
 
 ## Local environment (verified)
 
