@@ -28,6 +28,8 @@ cd apps/tray && npx tsc -b && npx electron .
 # Installer + landing page
 pnpm build:installer                     # -> apps/landing/public/download/qaytnoma-setup.exe
 pnpm --filter @barcodeer/landing dev     # serve the download page on :4173
+pnpm deploy:landing                      # server pulls origin/v2 — commit first or nothing changes
+pnpm deploy:installer                    # uploads to a .part name, then renames on the server
 ```
 
 The installer offers to install the **Epson scanner driver** when none is found
@@ -172,6 +174,7 @@ longer the mechanism for *finding* rows.
 - **Skip SKU OCR when the catalogue knows the barcode** (`ExtractOptions.knownSku`) — it was the single largest per-row cost (2 Tesseract passes) for a value that gets overwritten anyway.
 - **Scanner and pipeline overlap** (`scanStream` + `AsyncIterable` pages in `runPipeline`). Per-page WIA events come from `wia-scan.ps1` stdout; never make `runPipeline` wait for the whole batch.
 - **A file an EXTERNAL process reads must live outside `app.asar`.** `wia-scan.ps1` is opened by `powershell.exe`, not by Node, and to any non-Electron process `app.asar` is a single file, not a directory. Packed inside it, the installed app started fine, showed its tray icon and settings, and then simply never moved the scanner — while `npx electron .` worked, because there the script is an ordinary file. It shipped to a user that way. The fix is two halves that must stay together: `asarUnpack` in `electron-builder.yml` and the `app.asar` → `app.asar.unpacked` rewrite in `scriptPath()` (`packages/scanner/src/index.ts`). `build-installer.mjs` now fails the build if the `.ps1` is not in `app.asar.unpacked`.
+- **`scp` straight into the web root publishes a half-written file.** The 132 MB installer takes a minute or two, and nginx keeps serving the file the whole time — measured mid-upload, the site reported the previous build's length. Anyone downloading in that window gets a corrupt `.exe` that only fails at install time. `scripts/deploy-installer.mjs` uploads to a dot-prefixed `.part` name and renames on the server (`mv` within one filesystem is an atomic `rename`), publishes the `.exe` *before* `meta.json` so the page never advertises a build that isn't there yet, and then verifies the served `Content-Length`.
 - **A config default that points where the installer never writes.** `tessdataPath` defaults to `%APPDATA%/barcodeer/tessdata`, but `extraResources` puts the language files in `<install>/resources/tessdata`. Nothing creates the former, so OCR in the installed app had no language data at all — invisible in development, where `loadConfig` finds the repo's `.tessdata`. `apps/tray/src/main/index.ts` now passes the packaged path as the default *and* repairs a stored path that no longer exists (`config.json` outranks defaults, so fixing the default alone leaves old installs broken).
 - **Report the scan error without waiting for the pipeline.** `runPipeline` opens by syncing the ~23 000-row catalogue over the network, so a `Promise.all` of scan + pipeline left the tray amber for another half-minute after the scanner had already failed, hiding the cause.
 
