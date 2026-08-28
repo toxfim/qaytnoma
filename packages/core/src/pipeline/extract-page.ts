@@ -31,7 +31,8 @@ import {
   parseHeaderFields,
   type HeaderFields,
 } from '../ocr/header-fields.js';
-import { mergeSkuPasses } from '../ocr/sku.js';
+import { looksLikeValidSku, mergeSkuPasses } from '../ocr/sku.js';
+import type { VlmCell, VlmReader } from '../vlm/reader.js';
 import { normalizeSku, parseQuantity, parseTotal } from '../ocr/parse.js';
 
 /**
@@ -87,6 +88,15 @@ export interface ExtractedRow {
   /** Katak kesmasi PNG — `needs_review` UI uchun. */
   quantityCrop?: Buffer;
   skuCrop?: Buffer;
+  /** Qiymat qayerdan olindi. `vlm` — model o'qigan, tekshiruvga belgilanadi. */
+  quantitySource?: 'ocr' | 'vlm';
+  skuSource?: 'ocr' | 'vlm';
+  /**
+   * OCR ishonchsiz chiqqan katakning tayyor kesmasi — modelga yuborish uchun
+   * saqlanadi. Model chaqirilmasa (yoki chaqirilib bo'lgach) tashlab yuboriladi.
+   */
+  assistQtyPng?: Buffer;
+  assistSkuPng?: Buffer;
 }
 
 export interface ExtractedTotals {
@@ -117,6 +127,8 @@ export interface PageExtraction {
   totals: ExtractedTotals;
   /** To'r topilmadi — sahifa mahsulot jadvalisiz (masalan faqat imzo sahifasi). */
   gridFound: boolean;
+  /** Sahifa to'liq model orqali o'qildi (to'r topilmagani uchun). */
+  vlmRescued: boolean;
   width: number;
   height: number;
   /** Deskew qilingan sahifaning JPEG nusxasi — arxiv PDF uchun. */
@@ -134,6 +146,27 @@ export interface ExtractOptions {
   knownSku?: (barcode: string) => boolean;
   /** Bir vaqtda qayta ishlanadigan qatorlar soni. */
   rowConcurrency?: number;
+  /**
+   * Gemini zaxirasi. Berilmasa quvur avvalgidek — faqat deterministik
+   * bosqichlar — ishlaydi (`vlm/reader.ts` dagi tamoyilga qarang).
+   */
+  vlm?: VlmOptions;
+}
+
+export interface VlmOptions {
+  reader: VlmReader;
+  /**
+   * `assist` — faqat o'qilmagan/ziddiyatli kataklar modelga yuboriladi.
+   * `full`  — bundan tashqari HAR BIR sahifa to'liq o'qiladi va natija
+   *           deterministik natija bilan solishtiriladi.
+   */
+  mode: 'assist' | 'full';
+  /**
+   * OCR variantlarining o'zaro mosligi shundan past bo'lsa katak
+   * ishonchsiz hisoblanadi. 1 dan kichik qiymat — variantlarning bittasi
+   * boshqacha o'qigan.
+   */
+  minAgreement?: number;
 }
 
 export async function extractPage(
@@ -169,6 +202,7 @@ export async function extractPage(
     rows: [],
     totals: { quantity: null, sum: null, quantityCandidates: [] },
     gridFound: grid !== null,
+    vlmRescued: false,
     width: page.width,
     height: page.height,
     archiveJpeg: Buffer.alloc(0),
@@ -219,7 +253,114 @@ export async function extractPage(
   base.rows = rows;
   base.totals = reconcileTotals(totals, rows);
   base.archiveJpeg = await archivePromise;
+
+  if (opts.vlm) {
+    await assistWithVlm(base, opts.vlm);
+    // To'r topilgan, ammo birorta qator chiqmagan sahifa ham yo'qolgan
+    // sahifadir — uni ham qutqarishga urinamiz.
+    if (needsRescue(base, opts.vlm.mode)) await rescueWithVlm(base, opts.vlm);
+  }
   return base;
+}
+
+/**
+ * O'qilmagan kataklarni modeldan so'raydi.
+ *
+ * Faqat kesmalar yuboriladi — butun sahifa emas. Bu ikki sababga ko'ra
+ * muhim: kesma ~10 barobar kam token oladi, va hujjatning shaxsiy
+ * ma'lumotlari (ФИО, telefon, shartnoma raqami) umuman jo'natilmaydi.
+ */
+async function assistWithVlm(page: PageExtraction, vlm: VlmOptions): Promise<void> {
+  const qtyCells: VlmCell[] = [];
+  const skuCells: VlmCell[] = [];
+  for (const row of page.rows) {
+    if (row.assistQtyPng) qtyCells.push({ id: row.itemBarcode, png: row.assistQtyPng });
+    if (row.assistSkuPng) skuCells.push({ id: row.itemBarcode, png: row.assistSkuPng });
+  }
+
+  const [quantities, skus] = await Promise.all([
+    qtyCells.length > 0 ? vlm.reader.readQuantityCells(qtyCells) : new Map<string, number>(),
+    skuCells.length > 0 ? vlm.reader.readSkuCells(skuCells) : new Map<string, string>(),
+  ]);
+
+  for (const row of page.rows) {
+    const qty = quantities.get(row.itemBarcode);
+    // OCR o'qigan, lekin ishonchsiz bo'lgan qiymat model bilan MOS KELSA
+    // manba `ocr` bo'lib qoladi — ikki mustaqil o'qish bir xil natija bergan.
+    if (qty !== undefined && qty !== row.quantity) {
+      row.quantity = qty;
+      row.quantitySource = 'vlm';
+    }
+
+    const sku = skus.get(row.itemBarcode);
+    if (sku && sku !== row.sku) {
+      row.sku = sku;
+      row.skuSource = 'vlm';
+    }
+
+    delete row.assistQtyPng;
+    delete row.assistSkuPng;
+  }
+}
+
+/** Sahifa deterministik yo'l bilan umuman o'qilmadimi. */
+function needsRescue(page: PageExtraction, mode: VlmOptions['mode']): boolean {
+  if (mode === 'full') return true;
+  return page.rows.length === 0;
+}
+
+/**
+ * Butun sahifani modelga berib o'qiydi.
+ *
+ * DETERMINISTIK NATIJA USTUN: mavjud qator ustiga yozilmaydi, faqat
+ * bo'sh joylar to'ldiriladi. Model o'qigan shtrix-kod 13 xonali bo'lishi
+ * shart, qolgani esa katalog orqali mustaqil tasdiqlanadi.
+ */
+async function rescueWithVlm(page: PageExtraction, vlm: VlmOptions): Promise<void> {
+  const result = await vlm.reader.readPage(page.archiveJpeg);
+  if (!result) return;
+
+  if (!page.docId && result.docId) {
+    page.docId = result.docId;
+    page.docNumber = result.docNumber;
+    // Hujjat raqami faqat sarlavha sahifasida bo'ladi — guruhlash uchun
+    // sahifani sarlavha deb belgilaymiz.
+    page.isHeaderPage = true;
+  }
+  if (!page.docDate && result.docDate) page.docDate = result.docDate;
+
+  if (page.rows.length === 0) {
+    page.rows = result.rows
+      .filter((r): r is typeof r & { barcode: string } => r.barcode !== null)
+      .map((r) => ({
+        bandIndex: -1,
+        itemBarcode: r.barcode,
+        sku: r.sku,
+        skuLatin: null,
+        skuCyrillic: null,
+        quantity: r.quantity,
+        quantityRaw: r.quantity === null ? null : String(r.quantity),
+        quantityAgreement: 0,
+        quantitySource: 'vlm' as const,
+        skuSource: r.sku ? ('vlm' as const) : undefined,
+      }));
+    page.vlmRescued = page.rows.length > 0;
+  } else {
+    // `full` rejim: mavjud qatorlardagi bo'sh miqdorlarni to'ldiramiz.
+    const byBarcode = new Map(result.rows.map((r) => [r.barcode, r]));
+    for (const row of page.rows) {
+      if (row.quantity !== null) continue;
+      const found = byBarcode.get(row.itemBarcode);
+      if (found?.quantity != null) {
+        row.quantity = found.quantity;
+        row.quantitySource = 'vlm';
+      }
+    }
+  }
+
+  if (page.totals.quantity === null && result.totalQuantity !== null) {
+    page.totals = { ...page.totals, quantity: result.totalQuantity };
+  }
 }
 
 /**
@@ -437,7 +578,15 @@ async function readRows(
       row.quantityRaw = voted.text;
       row.quantity = voted.text ? parseQuantity(voted.text) : null;
       row.quantityAgreement = voted.agreement;
+      if (row.quantity !== null) row.quantitySource = 'ocr';
       if (opts.keepCrops) row.quantityCrop = variants[0] ?? undefined;
+
+      // Modelga yuboriladigan kesma — o'qilmagan yoki variantlar zid chiqqan
+      // katakniki. `variants[1]` — ostonasiz, kattalashtirilgan kulrang nusxa:
+      // binarizatsiya qilingan variantdan ko'ra modelga tabiiyroq.
+      const uncertain =
+        row.quantity === null || voted.agreement < (opts.vlm?.minAgreement ?? 1);
+      if (opts.vlm && uncertain) row.assistQtyPng = variants[1] ?? variants[0] ?? undefined;
     }
 
     // --- SKU: lotin + kirill o'tishlari — FAQAT katalogda yo'q bo'lsa ---
@@ -458,7 +607,10 @@ async function readRows(
         row.skuLatin = normalizeSku(latin.text);
         row.skuCyrillic = normalizeSku(cyrillic.text);
         row.sku = mergeSkuPasses(row.skuLatin, row.skuCyrillic);
+        if (row.sku) row.skuSource = 'ocr';
         if (opts.keepCrops) row.skuCrop = png;
+        // SKU OCR aniqligi 47% — kutilgan shaklga tushmasa modelga beriladi.
+        if (opts.vlm && !looksLikeValidSku(row.sku)) row.assistSkuPng = png;
       }
     }
 

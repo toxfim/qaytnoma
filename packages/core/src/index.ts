@@ -14,7 +14,16 @@ export { parseQuantity, parseDocDate, parseDocNumber, normalizeSku } from './ocr
 export { parseHeaderFields, docNumberFromId, HEADER_REGION } from './ocr/header-fields.js';
 export { mergeSkuPasses, looksLikeValidSku } from './ocr/sku.js';
 
-export { extractPage, type PageExtraction, type ExtractedRow } from './pipeline/extract-page.js';
+export {
+  extractPage,
+  type PageExtraction,
+  type ExtractedRow,
+  type VlmOptions,
+} from './pipeline/extract-page.js';
+
+export { GeminiClient, GeminiError, type TokenUsage, emptyUsage } from './vlm/gemini.js';
+export { VlmReader, type VlmPage, type VlmRow } from './vlm/reader.js';
+export { vlmFromConfig } from './vlm/setup.js';
 export { resolveColumns, type ColumnMap } from './layout/columns.js';
 export { groupIntoDocuments } from './pipeline/group.js';
 export { validateDocument, rowNeedsReview } from './pipeline/validate.js';

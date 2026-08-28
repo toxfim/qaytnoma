@@ -22,6 +22,8 @@ npx tsx src/cli.ts scan                  # scan the ADF and run the full pipelin
 npx tsx src/cli.ts scan --pages 1 --no-sheets   # scan only n sheets, dry run
 npx tsx src/cli.ts ingest <dir> --no-sheets   # re-run on existing images, no writes
 npx tsx src/cli.ts sync-catalogue        # force-refresh Баркод → Скю (auto-refreshes every 24h)
+npx tsx src/cli.ts gemini <image>        # read one page with Gemini only, print rows + token cost
+npx tsx src/cli.ts ingest <dir> --gemini # run the pipeline with the Gemini fallback on
 
 # Tray app
 cd apps/tray && npx tsc -b && npx electron .
@@ -80,6 +82,55 @@ looked up from Uzum's own `Баркод → Скю` table (`Остаток Уз�
 spreadsheet, 23 066 rows, zero conflicts) — `store/sku-catalogue.ts` and
 `input/catalogue-sheet.ts`. OCR remains only as a suggestion for barcodes the
 catalogue does not know, and those rows are flagged.
+
+## Gemini — a fallback, never the pipeline
+
+`geminiMode` is `off` by default and the model is **not** part of the normal
+path. The deterministic steps beat it on their own ground and cost nothing:
+the Code128 decoder reads item barcodes 36/36, the catalogue resolves СКУ
+100%, Tesseract reads `Кол-во` at 97.2%. Handing any of those to a model
+would lower accuracy and bill per page. The model is called only where the
+pipeline **demonstrably failed**:
+
+- `assist` — a `Кол-во` cell came back empty or the three OCR variants
+  disagreed; a SKU is not in the catalogue and OCR produced something that
+  does not match the SKU shape. Only those cell crops are sent — never the
+  page — which is both ~10x cheaper and keeps ФИО / phone / contract number
+  out of the request entirely.
+- rescue (part of `assist`) — the page yielded no rows at all. Today such a
+  page vanishes silently: "no rows found" is indistinguishable from "no rows
+  on the page". The whole page image goes to the model.
+- `full` — every page is additionally read whole. Expensive; the
+  deterministic result still wins wherever it exists, so this only fills
+  gaps and cross-checks.
+
+**A model-sourced value is written but always flagged.** `quantitySource` /
+`skuSource` (`shared/types.ts`) carry the provenance to validation, which
+raises `VLM_SOURCED` (warn) so the row lands in the sheet with `⚠`. A row
+with a value a human checks is strictly better than the current outcome —
+no row at all.
+
+**Guardrails that matter:**
+
+- A batch whose answer count does not match the cell count is discarded
+  whole. A value landing on the wrong row is worse than an unread cell.
+- Barcodes the model reads must be 13 digits, and the catalogue (23 066
+  entries) then confirms them independently — an invented barcode does not
+  resolve and the row is flagged.
+- `store: false` on every request: the API stores interactions server-side
+  by default, and these are real invoices.
+- Any Gemini error is recorded as a warning and the pipeline continues. The
+  scan never fails because a model was unreachable.
+
+The API is the Interactions API (`POST /v1beta/interactions`), used directly
+over `fetch` — no SDK, so the request body stays visible, which is what makes
+the token cost auditable. `RunResult.vlmUsage` reports input/output/thought
+tokens per run; the CLI prints them.
+
+**Not yet verified against the live API** — there was no key on this machine.
+`test/gemini.test.ts` stubs `fetch` and pins the request shape (endpoint,
+`x-goog-api-key`, `store: false`, `response_format.json_schema`, base64 image
+parts) plus the usage accounting against the documented contract.
 
 ## Goal
 

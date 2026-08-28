@@ -16,6 +16,7 @@ import {
   runPipeline,
   SheetsWriter,
   SkuCatalogue,
+  vlmFromConfig,
   type BarcodeerConfig,
   type CatalogueOptions,
   type ProgressEvent,
@@ -211,6 +212,8 @@ export class JobRunner {
       invoicesRoot: config.invoicesRoot,
       sheets,
       catalogue: await catalogueOptions(config),
+      // Kalit kiritilmagan yoki rejim `off` bo'lsa `undefined` qaytadi.
+      vlm: vlmFromConfig(config),
       onProgress: (event) => this.store.update({ activity: describe(event) }),
     });
   }
@@ -311,6 +314,11 @@ function describe(event: ProgressEvent): string {
       return `Sheets: ${event.rows} qator` + (event.skipped ? `, ${event.skipped} takror o'tkazildi` : '');
     case 'recovered':
       return `Navbatdan tiklandi: ${event.rows} qator`;
+    case 'vlm':
+      return (
+        `Til modeli: ${event.requests} so'rov, ${event.totalTokens} token` +
+        (event.rescuedPages ? `, ${event.rescuedPages} sahifa qutqarildi` : '')
+      );
     case 'warning':
       return event.message;
   }

@@ -160,6 +160,38 @@
       </fieldset>
 
       <fieldset>
+        <legend>Til modeli (Gemini) &mdash; zaxira o'qish</legend>
+        <p style="margin: 0 0 12px; color: var(--muted)">
+          Ba'zan katak o'qilmaydi yoki sahifadagi jadval umuman topilmaydi &mdash;
+          bunday qatorlar hozir jadvalga tushmaydi. Kalit kiritilsa, aynan
+          o'sha joylar Gemini orqali o'qiladi va qator <code>&#9888;</code>
+          bilan belgilanadi. Barcha qatorlar emas, faqat muammoli joylar
+          yuboriladi.
+        </p>
+        <label>
+          <span>API kaliti</span>
+          <input type="password" name="geminiApiKey" placeholder="Ishlatilmaydi" autocomplete="off" />
+          <small>aistudio.google.com/apikey dan olinadi. Bo'sh qoldirilsa model umuman chaqirilmaydi.</small>
+        </label>
+        <div class="row">
+          <label style="flex: 1">
+            <span>Rejim</span>
+            <select name="geminiMode">
+              <option value="off">O'chirilgan</option>
+              <option value="assist">Faqat o'qilmagan joylar</option>
+              <option value="full">Har bir sahifa to'liq</option>
+            </select>
+            <small>"Har bir sahifa to'liq" ancha qimmat &mdash; odatda kerak emas.</small>
+          </label>
+          <label style="flex: 1">
+            <span>Model</span>
+            <input type="text" name="geminiModel" />
+            <small><code>gemini-3.5-flash-lite</code> arzonroq.</small>
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset>
         <legend>Skaner</legend>
         <label>
           <span>Qurilma nomi</span>
@@ -230,6 +262,9 @@
           ...data,
           scanDpi: Number(data.scanDpi) || 600,
           catalogueMaxAgeHours: Number(data.catalogueMaxAgeHours) || 24,
+          geminiApiKey: data.geminiApiKey ?? '',
+          geminiModel: data.geminiModel || 'gemini-3.7-flash',
+          geminiMode: data.geminiMode || 'off',
           hotFolder: data.hotFolder || null,
           catalogueSpreadsheetId: data.catalogueSpreadsheetId || null,
           flagColumn: form.elements.flagColumn.checked,

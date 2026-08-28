@@ -68,6 +68,22 @@ export const configSchema = z.object({
   /** Katalog shundan eski bo'lsa skanerlashdan oldin avtomatik yangilanadi. */
   catalogueMaxAgeHours: z.number().min(0).default(24),
 
+  // ---- Gemini (til modeli zaxirasi) ----
+  /**
+   * Gemini API kaliti. Bo'sh bo'lsa model umuman ishlatilmaydi va quvur
+   * avvalgidek — faqat deterministik bosqichlar bilan — ishlaydi.
+   */
+  geminiApiKey: z.string().default(''),
+  /** Model nomi. `gemini-3.5-flash-lite` arzonroq, `gemini-3.7-flash` aniqroq. */
+  geminiModel: z.string().default('gemini-3.7-flash'),
+  /**
+   * `off`    — model chaqirilmaydi;
+   * `assist` — faqat OCR o'qiy olmagan kataklar va butunlay o'qilmagan
+   *            sahifalar modelga beriladi (tavsiya etiladi);
+   * `full`   — har bir sahifa to'liq modelga ham beriladi (qimmat).
+   */
+  geminiMode: z.enum(['off', 'assist', 'full']).default('off'),
+
   /** Tesseract til fayllari papkasi. */
   tessdataPath: z.string().min(1),
   /** Ichki ma'lumotlar (SKU lug'ati, indeks) papkasi. */
@@ -113,6 +129,9 @@ export function defaults(dataDir = defaultDataDir()): Partial<BarcodeerConfig> {
     catalogueSkuColumn: 'B',
     catalogueBarcodeColumn: 'G',
     catalogueMaxAgeHours: 24,
+    geminiApiKey: '',
+    geminiModel: 'gemini-3.7-flash',
+    geminiMode: 'off',
     tessdataPath: join(dataDir, 'tessdata'),
     dataDir,
     // `spreadsheetId` va `serviceAccountPath` ATAYLAB yo'q: ular aniqlanmagan
@@ -155,6 +174,9 @@ export async function loadConfig(opts: LoadOptions = {}): Promise<BarcodeerConfi
     if (env.FINANCE_SHEET_ID) raw.catalogueSpreadsheetId ??= env.FINANCE_SHEET_ID;
     if (env.FINANCE_UZUM_STOCKS) raw.catalogueSheetName = env.FINANCE_UZUM_STOCKS;
     raw.serviceAccountPath ??= join(opts.devRoot, 'credentials.local.json');
+    // Kalit `.env` da turadi — repoga tushmasin.
+    if (env.GEMINI_API_KEY) raw.geminiApiKey ||= env.GEMINI_API_KEY;
+    if (env.GEMINI_MODEL) raw.geminiModel = env.GEMINI_MODEL;
 
     // Repo ichida yuklab olingan til fayllari bo'lsa, ular ustuvor —
     // ishlab chiqishda `%APPDATA%` ga nusxa ko'chirish shart bo'lmasin.

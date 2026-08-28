@@ -8,7 +8,8 @@
 import { join } from 'node:path';
 import type { InvoiceDocument } from '@barcodeer/shared';
 import { OcrEngine } from '../ocr/engine.js';
-import { extractPage, type PageExtraction } from './extract-page.js';
+import { extractPage, type PageExtraction, type VlmOptions } from './extract-page.js';
+import { emptyUsage, type TokenUsage } from '../vlm/gemini.js';
 import { groupIntoDocuments } from './group.js';
 import { validateDocument } from './validate.js';
 import { markDuplicates } from './dedupe.js';
@@ -52,6 +53,11 @@ export interface RunOptions {
   sheets?: SheetsWriter;
   /** Uzum katalogi. Berilmasa SKU faqat OCR dan olinadi. */
   catalogue?: CatalogueOptions;
+  /**
+   * Gemini zaxirasi (`vlm/setup.ts` dagi `vlmFromConfig`). Berilmasa quvur
+   * faqat deterministik bosqichlar bilan ishlaydi.
+   */
+  vlm?: VlmOptions;
   /** Skanerlash vaqti (PDF papkasi nomi shundan olinadi). */
   scannedAt?: Date;
   /** Jarayon haqida xabar berish. */
@@ -65,6 +71,7 @@ export type ProgressEvent =
   | { type: 'pdf'; docId: string; path: string }
   | { type: 'sheets'; rows: number; flagged: number; skipped: number }
   | { type: 'recovered'; rows: number; batches: number }
+  | { type: 'vlm'; requests: number; totalTokens: number; rescuedPages: number }
   | { type: 'warning'; message: string };
 
 export interface RunResult {
@@ -86,6 +93,10 @@ export interface RunResult {
   rowsRecovered: number;
   /** Hali ham navbatda turgan — yozilmagan qatorlar. */
   rowsPending: number;
+  /** Til modeli sarflagan tokenlar. Model ishlatilmagan bo'lsa nol. */
+  vlmUsage: TokenUsage;
+  /** Deterministik yo'l bilan o'qilmay, model orqali qutqarilgan sahifalar. */
+  vlmRescuedPages: number;
   /** SKU si katalogdan yoki tasdiqlangan lug'atdan olingan qatorlar. */
   skuResolved: number;
   /** SKU si faqat OCR dan olingan qatorlar. */
@@ -129,11 +140,26 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     let i = 0;
     for await (const path of opts.pages) {
       opts.onProgress?.({ type: 'page', index: i, total: total ?? i + 1, path });
-      extracted.push(await extractPage(path, i, ocr, { knownSku }));
+      extracted.push(await extractPage(path, i, ocr, { knownSku, vlm: opts.vlm }));
       i++;
     }
   } finally {
     if (ownOcr) await ocr.close();
+  }
+
+  // --- Til modeli hisoboti ---
+  const vlmUsage = opts.vlm?.reader.usage ?? emptyUsage();
+  const vlmRescuedPages = extracted.filter((p) => p.vlmRescued).length;
+  if (vlmUsage.requests > 0) {
+    opts.onProgress?.({
+      type: 'vlm',
+      requests: vlmUsage.requests,
+      totalTokens: vlmUsage.totalTokens,
+      rescuedPages: vlmRescuedPages,
+    });
+  }
+  for (const message of opts.vlm?.reader.errors ?? []) {
+    warn(`Til modeli: ${message}`);
   }
 
   const { documents, orphanPages } = groupIntoDocuments(extracted, { scannedAt });
@@ -274,6 +300,8 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     rowsSkipped,
     rowsRecovered,
     rowsPending: pending.rowCount,
+    vlmUsage,
+    vlmRescuedPages,
     skuResolved: trustedBarcodes.size,
     skuFromOcr,
     catalogueEntries: catalogue.size,

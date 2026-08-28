@@ -70,6 +70,9 @@ function registerHandlers(store: Store, onSave: SaveHandler): void {
       catalogueSkuColumn: c.catalogueSkuColumn,
       catalogueBarcodeColumn: c.catalogueBarcodeColumn,
       catalogueMaxAgeHours: c.catalogueMaxAgeHours,
+      geminiApiKey: c.geminiApiKey,
+      geminiModel: c.geminiModel,
+      geminiMode: c.geminiMode,
     };
   });
 
@@ -89,6 +92,9 @@ function registerHandlers(store: Store, onSave: SaveHandler): void {
         catalogueSkuColumn: payload.catalogueSkuColumn,
         catalogueBarcodeColumn: payload.catalogueBarcodeColumn,
         catalogueMaxAgeHours: Number(payload.catalogueMaxAgeHours),
+        geminiApiKey: payload.geminiApiKey ?? '',
+        geminiModel: payload.geminiModel || 'gemini-3.7-flash',
+        geminiMode: payload.geminiMode ?? 'off',
       });
       return { ok: true };
     } catch (err) {
