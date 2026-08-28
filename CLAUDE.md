@@ -176,6 +176,38 @@ longer the mechanism for *finding* rows.
 - **A file an EXTERNAL process reads must live outside `app.asar`.** `wia-scan.ps1` is opened by `powershell.exe`, not by Node, and to any non-Electron process `app.asar` is a single file, not a directory. Packed inside it, the installed app started fine, showed its tray icon and settings, and then simply never moved the scanner — while `npx electron .` worked, because there the script is an ordinary file. It shipped to a user that way. The fix is two halves that must stay together: `asarUnpack` in `electron-builder.yml` and the `app.asar` → `app.asar.unpacked` rewrite in `scriptPath()` (`packages/scanner/src/index.ts`). `build-installer.mjs` now fails the build if the `.ps1` is not in `app.asar.unpacked`.
 - **`scp` straight into the web root publishes a half-written file.** The 132 MB installer takes a minute or two, and nginx keeps serving the file the whole time — measured mid-upload, the site reported the previous build's length. Anyone downloading in that window gets a corrupt `.exe` that only fails at install time. `scripts/deploy-installer.mjs` uploads to a dot-prefixed `.part` name and renames on the server (`mv` within one filesystem is an atomic `rename`), publishes the `.exe` *before* `meta.json` so the page never advertises a build that isn't there yet, and then verifies the served `Content-Length`.
 - **A config default that points where the installer never writes.** `tessdataPath` defaults to `%APPDATA%/barcodeer/tessdata`, but `extraResources` puts the language files in `<install>/resources/tessdata`. Nothing creates the former, so OCR in the installed app had no language data at all — invisible in development, where `loadConfig` finds the repo's `.tessdata`. `apps/tray/src/main/index.ts` now passes the packaged path as the default *and* repairs a stored path that no longer exists (`config.json` outranks defaults, so fixing the default alone leaves old installs broken).
+- **A missed grid line at the very END of the table loses a row silently.**
+  `repairMissedLines` only splits bands that already exist, so a faint bottom
+  border on the last row produces no band at all — no error, no warning, one
+  row simply absent. Measured on `15-0006740693` page 1: the line under row 13
+  projected at 0.317 against a 0.45 threshold, the grid stopped above it, and
+  the sheet got 37 of 38 rows. `extendTableDown` (`layout/grid.ts`) now probes
+  below the table at the median row pitch with a lowered threshold; the guard
+  is not the threshold but the VERTICAL STRUCTURE — the candidate band must
+  carry the table's own column edges, which rejects the `Итого` band and the
+  signature block on its own.
+- **Noise specks disable the OCR upscale without touching the digit.** Blue-ink
+  removal leaves faint grey dots in the cell. They are harmless in themselves,
+  but `contentBox` grows to include them (7x23 → 50x79), so `prepareForOcr`
+  computes `scale = targetHeight / h` below 1 and skips upscaling entirely —
+  the digit reaches Tesseract at its original ~25 px and comes back empty. Six
+  visually clean quantities read as null this way. `denoiseSpecks` drops
+  connected components shorter than 0.45 of the tallest; it is enabled only for
+  cells whose content is uniformly tall (`Кол-во`, `Итого`) — never for SKU,
+  where the dot on an `i` is legitimately small.
+- **Tesseract merges adjacent thin glyphs and scale does not help.** A clean
+  `11` reads as `1` in both PSM 8 and PSM 7, identically at every target height
+  from 80 to 260 px. Separating the glyphs horizontally is what fixes it:
+  `stretchX: 1.5` gives `"11"` at confidence 94. `readTotals` adds that as a
+  third reading, fed only into the candidate list — `reconcileTotals` picks it
+  when it matches the row sum, so nothing else changes.
+- **The ADF sensor bit is stale right after paper is loaded.** The DS-530II
+  driver does not refresh `WIA_DPS_DOCUMENT_HANDLING_STATUS` immediately, so
+  pressing Scan just after reloading the feeder reported `NO_PAPER` with the
+  paper sitting in place. `wia-scan.ps1` now re-reads the status a few times
+  and then attempts the transfer regardless; the authoritative answer is the
+  driver's own `WIA_ERROR_PAPER_EMPTY` — if no page came through, that is when
+  `NO_PAPER` is emitted.
 - **Report the scan error without waiting for the pipeline.** `runPipeline` opens by syncing the ~23 000-row catalogue over the network, so a `Promise.all` of scan + pipeline left the tray amber for another half-minute after the scanner had already failed, hiding the cause.
 
 **Known pitfalls to design around:** scanners write incrementally, so ingesting mid-write corrupts files; higher DPI is *not* monotonically better for Code128 (test 200/300/400 empirically); ZXing has narrow tilt tolerance on scans — keep a zbar/rotate/upscale fallback; Tesseract PSM 3 returns "Empty page" on single-cell crops; if the hot folder is an SMB share, poll rather than rely on FS events.

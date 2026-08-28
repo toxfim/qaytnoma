@@ -51,7 +51,12 @@ const ARCHIVE_QUALITY = 80;
 /** Hujjat shtrix-kodi joylashgan hudud — sarlavha hududining o'ng qismi. */
 const DOC_BARCODE_REGION = { xFrac: 0.66, yFrac: 0, widthFrac: 0.34, heightFrac: 0.11 } as const;
 
-/** OCR uchun uchta tayyorgarlik varianti — ular bo'yicha ovoz beriladi. */
+/**
+ * OCR uchun uchta tayyorgarlik varianti — ular bo'yicha ovoz beriladi.
+ *
+ * Raqam kataklarida `denoise: true` bilan chaqiriladi (`Кол-во`, `Итого`), SKU
+ * uchun esa YO'Q — sababi `denoiseSpecks` izohida.
+ */
 const OCR_VARIANTS = [
   { targetHeight: 80, threshold: 160 },
   { targetHeight: 120, threshold: 0 },
@@ -426,7 +431,7 @@ async function readRows(
     if (qtyBox) {
       const ink = await removeBlueInk(cropFull(page, qtyBox));
       const variants = await Promise.all(
-        OCR_VARIANTS.map((v) => prepareForOcr(ink.data, ink.width, ink.height, v)),
+        OCR_VARIANTS.map((v) => prepareForOcr(ink.data, ink.width, ink.height, { ...v, denoise: true })),
       );
       const voted = await ocr.readVoted(variants, 'digits');
       row.quantityRaw = voted.text;
@@ -523,16 +528,28 @@ async function readTotals(
     };
     const ink = await removeBlueInk(cropFull(page, box));
     const variants = await Promise.all(
-      OCR_VARIANTS.map((v) => prepareForOcr(ink.data, ink.width, ink.height, v)),
+      OCR_VARIANTS.map((v) => prepareForOcr(ink.data, ink.width, ink.height, { ...v, denoise: true })),
     );
 
     // Ikki PSM rejimida: PSM 8 takrorlangan ingichka gliflarni (`11`) birlashtirib
     // yuborishi mumkin, PSM 7 esa yakka raqamda zaifroq — birgalikda ishonchli.
-    const [word, line] = await Promise.all([
+    //
+    // Uchinchi o'qish — gorizontal cho'zilgan nusxa. U ikkala PSM ham `11` ni
+    // `1` deb o'qiydigan holatni qutqaradi (`stretchX` izohiga qarang): natija
+    // OVOZ BERISHGA QO'SHILMAYDI, faqat nomzodlar ro'yxatiga tushadi, shuning
+    // uchun `reconcileTotals` uni qatorlar yig'indisiga mos kelgandagina
+    // tanlaydi va boshqa hollarda hech narsa o'zgarmaydi.
+    const stretched = await Promise.all(
+      OCR_VARIANTS.map((v) =>
+        prepareForOcr(ink.data, ink.width, ink.height, { ...v, denoise: true, stretchX: 1.5 }),
+      ),
+    );
+    const [word, line, wide] = await Promise.all([
       ocr.readVoted(variants, 'digits'),
       ocr.readVoted(variants, 'digitsLine'),
+      ocr.readVoted(stretched, 'digits'),
     ]);
-    const candidates = [word.text, line.text]
+    const candidates = [word.text, line.text, wide.text]
       .map((t) => (t ? parseTotal(t) : null))
       .filter((n): n is number => n !== null);
 

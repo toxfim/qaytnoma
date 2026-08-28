@@ -241,3 +241,85 @@ nomzod mos kelmasa, nomuvofiqlik avvalgidek xato sifatida ko'rsatiladi.
 Natija: 8 sahifaning hammasida `Итого` to'g'ri (v1 da 3 tasida null/xato). Dasturiy tomondan yana yutuq beradigan joylar: Sheets API so'rovlari
 (sarlavha tekshiruvi endi bir marta bajariladi), OCR worker'lari (tray ilovada
 skanerlashlar orasida isitilgan holda saqlanadi).
+
+## 2026-08-28 — `15-0006740693` (38 qator, 3 sahifa)
+
+Foydalanuvchi bildirgan holat: hujjatda 38 qator, sheetga 37 tasi tushgan;
+qayta skanerlashda esa "Skanerda qog'oz topilmadi" chiqqan. Arxiv PDF dagi
+sahifalar bo'yicha qayta o'lchandi.
+
+### Boshlang'ich holat
+
+| | qiymat |
+|---|---|
+| Qatorlar | 37 / 38 |
+| `Кол-во` o'qilgan | 31 / 37 (6 ta null) |
+| `Итого` | 132 (to'g'ri), Σ = 100 |
+| Belgilangan qatorlar | 41 |
+
+### Ikkita mustaqil sabab
+
+**1. Jadvalning eng oxirgi qatori yo'qoladi — hech qanday xatosiz.**
+
+1-sahifada №13 qatorining pastki chizig'i uzuq-yuluq bosilgan: proyeksiya
+ulushi **0.317**, `findHorizontalLines` ostonasi esa 0.45. To'r y=2991 da
+to'xtagan, №13 (`1000028126606`, miqdor 2) esa hech qanday band hosil
+qilmagan. `repairMissedLines` bu holatni ushlay olmaydi — u faqat MAVJUD
+bandlar ichidagi chiziqni tiklaydi, jadval oxiridan tashqarida emas.
+
+Yechim — `extendTableDown` (`layout/grid.ts`): jadval oxiridan pastda median
+qator balandligi masofasida pasaytirilgan oston bilan cho'qqi qidiriladi.
+Ostonani umumiy pasaytirmaslik uchun himoya VERTIKAL TUZILISHGA qo'yilgan —
+qabul qilingan bandda jadvalning o'z ustun chegaralari topilishi shart. Bu
+`Итого` bandini ham, imzo blokini ham avtomatik rad etadi, chunki ularda
+ustunlar birlashadi.
+
+**2. Toza raqam o'qilmaydi, chunki masshtablash jimgina o'chib qoladi.**
+
+Olti katakda raqam ko'z bilan toza ko'rinardi (`3`, `1`, `2`, `12`, `7`), OCR
+esa bo'sh qaytarardi. Sabab zanjiri: `removeBlueInk` dan keyin mayda kulrang
+qoldiq nuqtalar qoladi → `contentBox` 7x23 o'rniga 50x79 gacha cho'ziladi →
+`prepareForOcr` da `scale = targetHeight / h` birdan kichik bo'lib qoladi →
+raqam Tesseract'ga original ~25 px balandlikda boradi → bo'sh natija.
+
+Yechim — `denoiseSpecks` (`image/bbox.ts`): bog'langan komponentlar bo'yicha
+eng balandiga nisbatan 0.45 dan past bo'lganlari oqartiriladi. Faqat mazmuni
+bir xil balandlikdagi kataklarda yoqilgan (`Кол-во`, `Итого`); SKU/tavsifda
+`i` nuqtasi va apostrof qonuniy ravishda kichik, shuning uchun u yerda o'chiq.
+
+### Natija
+
+| | oldin | keyin |
+|---|---|---|
+| Qatorlar | 37 / 38 | **38 / 38** |
+| `Кол-во` | 31 / 37 | **38 / 38** |
+| Σ vs `Итого` | 100 ≠ 132 | **132 = 132** |
+| Belgilangan | 41 | **0** |
+
+### Regressiya: `Итого` va cho'zilgan nomzod
+
+`denoise` etalon skanning 3-sahifasida (`15-1006739165`) yangi xato keltirdi:
+katak tozalangach `Итого` **o'qiladigan** bo'ldi, ammo ikkala PSM ham toza
+`11` ni `1` deb o'qidi (Σ=11 → 9 qator bekorga belgilandi). Avvalgi yechim —
+"PSM 7 da ham o'qish" — bu rasmda yordam bermadi.
+
+O'lchov: masshtab hech narsani o'zgartirmaydi (targetHeight 80/120/160/200/260
+— hammasida `"1"`), gliflarni GORIZONTAL AJRATISH esa hal qiladi:
+
+| x-cho'zish | PSM 8 | PSM 7 |
+|---|---|---|
+| 1.0 | `"1"` (52) | `"1"` (61) |
+| **1.5** | **`"11"` (94)** | **`"11"` (79)** |
+| 2.0 | `"11"` (85) | `"11"` (43) |
+| 2.5 | `"11"` (72) | `"11"` (71) |
+| 3.0 | `""` (0) | `""` (0) |
+
+`prepareForOcr` ga `stretchX` qo'shildi va `readTotals` uchinchi o'qishni
+1.5x cho'zilgan nusxada bajaradi. Natija OVOZ BERISHGA qo'shilmaydi — faqat
+nomzodlar ro'yxatiga tushadi, shuning uchun `reconcileTotals` uni qatorlar
+yig'indisiga mos kelgandagina tanlaydi va boshqa hollarda hech narsa
+o'zgarmaydi.
+
+Etalon 4 sahifali skan (36 qator, 3 hujjat) shundan keyin: **36/36 qator,
+0 belgilangan, birorta ogohlantirishsiz** — oldin `15-1006739165` da
+"`Итого` qatoridagi miqdor o'qilmadi" bor edi.

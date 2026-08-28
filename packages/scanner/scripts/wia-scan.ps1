@@ -141,11 +141,27 @@ try {
   # Pages = 1 -> har Transfer bitta sahifa qaytaradi (ADF loop shu bilan boshqariladi)
   Try-SetProp $dev.Properties $WIA_DPS_PAGES 1 'PAGES' | Out-Null
 
+  # ADF sensori holati.
+  #
+  # NEGA BU YERDA DARHOL TO'XTAMAYMIZ: DS-530II drayveri qog'oz solingandan
+  # keyin FEED_READY bitini darhol yangilamaydi. Foydalanuvchi qog'ozni qayta
+  # solib Skanerlash bosganda skript "ADF bosh" deb chiqib ketardi, holbuki
+  # qog'oz joyida edi. Shuning uchun status bir necha marta qayta o'qiladi,
+  # keyin esa BARIBIR Transfer ga urinib ko'riladi — qog'oz haqiqatan yo'q
+  # bo'lsa drayver WIA_ERROR_PAPER_EMPTY (0x80210003) qaytaradi va biz uni
+  # loop oxirida aniq aniqlaymiz. Sensor holatiga ishonishdan ko'ra bu
+  # ishonchliroq: noto'g'ri "qog'oz yo'q" xabari — foydalanuvchi uchun
+  # tushunarsiz nosozlik, ortiqcha Transfer urinishi esa bepul.
   $status = Get-PropValue $dev.Properties $WIA_DPS_DOCUMENT_HANDLING_STATUS
   Write-Log ('handling status = ' + $status)
+  for ($try = 1; $try -le 3; $try++) {
+    if ($null -eq $status -or (($status -band $FEED_READY) -ne 0)) { break }
+    Start-Sleep -Milliseconds 400
+    $status = Get-PropValue $dev.Properties $WIA_DPS_DOCUMENT_HANDLING_STATUS
+    Write-Log ('handling status (qayta {0}) = {1}' -f $try, $status)
+  }
   if ($null -ne $status -and (($status -band $FEED_READY) -eq 0)) {
-    Emit-Json @{ ok = $false; code = 'NO_PAPER'; error = 'ADF bosh - qogoz soling'; pages = @(); device = $deviceName }
-    exit 3
+    Write-Log 'FEED_READY yoq - baribir Transfer ga urinamiz'
   }
 
   $item = $dev.Items.Item(1)
@@ -219,6 +235,15 @@ try {
   }
 
   $sw.Stop()
+
+  # Birorta sahifa olinmadi — demak ADF haqiqatan bo'sh edi. Bu yagona
+  # ishonchli tekshiruv: yuqoridagi sensor holati eskirgan bo'lishi mumkin,
+  # Transfer ning javobi esa yo'q.
+  if ($pages.Count -eq 0) {
+    Emit-Json @{ ok = $false; code = 'NO_PAPER'; error = 'ADF bosh - qogoz soling'; pages = @(); device = $deviceName }
+    exit 3
+  }
+
   Emit-Json @{
     ok        = $true
     device    = $deviceName
