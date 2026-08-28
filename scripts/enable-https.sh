@@ -12,6 +12,10 @@
 # Jurnal:                   /var/log/qaytnoma-https.log
 set -uo pipefail
 
+# Cron minimal PATH bilan ishlaydi (/usr/bin:/bin) — certbot esa snap orqali
+# o'rnatilgan va /snap/bin da turadi. Aks holda "certbot: command not found".
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+
 DOMAIN=qaytnoma.tez-agent.uz
 IP=139.162.197.219
 TAG="[enable-https $(date -Is)]"
