@@ -16,6 +16,7 @@ import {
 } from '@barcodeer/shared';
 import { rowNeedsReview } from '../pipeline/validate.js';
 import { duplicateIssue, rowKey } from '../pipeline/dedupe.js';
+import { withRetry } from '../util/retry.js';
 
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
@@ -72,10 +73,12 @@ export class SheetsWriter {
 
   /** Ulanish va ruxsatlarni tekshiradi; varaq nomini qaytaradi. */
   async check(): Promise<{ title: string; sheets: string[] }> {
-    const res = await this.#api.spreadsheets.get({
-      spreadsheetId: this.#opts.spreadsheetId,
-      fields: 'properties.title,sheets.properties.title',
-    });
+    const res = await withRetry(() =>
+      this.#api.spreadsheets.get({
+        spreadsheetId: this.#opts.spreadsheetId,
+        fields: 'properties.title,sheets.properties.title',
+      }),
+    );
     return {
       title: res.data.properties?.title ?? '',
       sheets: (res.data.sheets ?? []).map((s) => s.properties?.title ?? ''),
@@ -118,11 +121,13 @@ export class SheetsWriter {
   async readRowKeys(): Promise<Set<string>> {
     const docCol = SHEET_HEADERS.indexOf('Ид документа');
     const barcodeCol = SHEET_HEADERS.indexOf('ШК');
-    const res = await this.#api.spreadsheets.values.get({
-      spreadsheetId: this.#opts.spreadsheetId,
-      range: `${quote(this.#opts.sheetName)}!A2:${columnLetter(Math.max(docCol, barcodeCol))}`,
-      valueRenderOption: 'UNFORMATTED_VALUE',
-    });
+    const res = await withRetry(() =>
+      this.#api.spreadsheets.values.get({
+        spreadsheetId: this.#opts.spreadsheetId,
+        range: `${quote(this.#opts.sheetName)}!A2:${columnLetter(Math.max(docCol, barcodeCol))}`,
+        valueRenderOption: 'UNFORMATTED_VALUE',
+      }),
+    );
 
     const keys = new Set<string>();
     for (const row of res.data.values ?? []) {
@@ -195,20 +200,32 @@ export class SheetsWriter {
   }
 
   async #createSheet(title: string): Promise<void> {
-    await this.#api.spreadsheets.batchUpdate({
-      spreadsheetId: this.#opts.spreadsheetId,
-      requestBody: { requests: [{ addSheet: { properties: { title } } }] },
-    });
+    await withRetry(() =>
+      this.#api.spreadsheets.batchUpdate({
+        spreadsheetId: this.#opts.spreadsheetId,
+        requestBody: { requests: [{ addSheet: { properties: { title } } }] },
+      }),
+    );
   }
 
+  /**
+   * Qatorlarni qo'shadi.
+   *
+   * `INSERT_ROWS` + qayta urinish birgalikda xavfsiz: so'rov serverga yetib
+   * borgan, ammo javob yo'qolgan holatda takror yozilishi MUMKIN — shuning
+   * uchun oxirgi himoya `pipeline/dedupe.ts` dagi `Ид + ШК` kaliti bo'lib
+   * qoladi, u keyingi skanerlashda nusxani ushlaydi.
+   */
   async #append(sheetName: string, values: (string | number)[][]): Promise<void> {
-    await this.#api.spreadsheets.values.append({
-      spreadsheetId: this.#opts.spreadsheetId,
-      range: `${quote(sheetName)}!A1`,
-      valueInputOption: 'RAW',
-      insertDataOption: 'INSERT_ROWS',
-      requestBody: { values },
-    });
+    await withRetry(() =>
+      this.#api.spreadsheets.values.append({
+        spreadsheetId: this.#opts.spreadsheetId,
+        range: `${quote(sheetName)}!A1`,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values },
+      }),
+    );
   }
 }
 

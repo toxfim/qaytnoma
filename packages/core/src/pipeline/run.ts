@@ -16,6 +16,7 @@ import { SkuDictionary } from '../store/sku-dictionary.js';
 import { SkuCatalogue } from '../store/sku-catalogue.js';
 import { SkuResolver } from '../store/sku-resolver.js';
 import { DocumentIndex } from '../store/index-log.js';
+import { PendingQueue } from '../store/pending-batch.js';
 import { fetchCatalogue, type CatalogueSource } from '../input/catalogue-sheet.js';
 import { writeDocumentPdf } from '../output/pdf.js';
 import { SheetsWriter, type SheetsCredentials } from '../output/sheets.js';
@@ -63,6 +64,7 @@ export type ProgressEvent =
   | { type: 'grouped'; documents: number }
   | { type: 'pdf'; docId: string; path: string }
   | { type: 'sheets'; rows: number; flagged: number; skipped: number }
+  | { type: 'recovered'; rows: number; batches: number }
   | { type: 'warning'; message: string };
 
 export interface RunResult {
@@ -77,6 +79,13 @@ export interface RunResult {
    * o'tkazib yuborilgan qatorlar (takroriy skan).
    */
   rowsSkipped: number;
+  /**
+   * Oldingi skanerlashlarda Sheets ga yozilmay qolgan va SHU safar
+   * yozilgan qatorlar (`store/pending-batch.ts`).
+   */
+  rowsRecovered: number;
+  /** Hali ham navbatda turgan — yozilmagan qatorlar. */
+  rowsPending: number;
   /** SKU si katalogdan yoki tasdiqlangan lug'atdan olingan qatorlar. */
   skuResolved: number;
   /** SKU si faqat OCR dan olingan qatorlar. */
@@ -104,6 +113,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
 
   const dictionary = await SkuDictionary.open(join(opts.dataDir, 'sku-map.json'));
   const index = await DocumentIndex.open(join(opts.dataDir, 'documents.jsonl'));
+  const pending = await PendingQueue.open(join(opts.dataDir, 'pending-batches.json'));
   const catalogue = await syncCatalogue(opts, scannedAt, warn);
   const resolver = new SkuResolver(catalogue, dictionary);
 
@@ -195,11 +205,19 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
   // --- Takror qatorlar: Ид + ШК allaqachon yozilgan bo'lsa tashlab ketiladi ---
   // Manba — Sheets'ning o'zi; Sheets o'chiq bo'lsa lokal indeks.
   let rowsSkipped = 0;
+  let rowsRecovered = 0;
   let sheetsError: Error | undefined;
   const existing = existingKeys ? await existingKeys : index.rowKeys();
   if (existing instanceof Error) {
     sheetsError = existing;
   } else {
+    // Navbat AVVAL bo'shatiladi: undagi qatorlar oldinroq skanerlangan,
+    // shuning uchun jadvalda ham oldinroq turishi kerak. Bu tartib takror
+    // tekshiruvi uchun ham to'g'ri — `markDuplicates` `existing` to'plamini
+    // to'ldirib boradi, ya'ni shu to'plamda takrorlangan hujjat ushlanadi.
+    if (sheets && pending.size > 0) {
+      rowsRecovered = await flushPending(pending, sheets, existing, opts, warn);
+    }
     const dup = markDuplicates(documents, existing);
     rowsSkipped = dup.skipped;
     if (dup.skipped > 0) {
@@ -223,7 +241,21 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
         skipped: res.rowsSkipped,
       });
     } catch (err) {
-      warn(`Google Sheets ga yozib bo'lmadi: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      // Qatorlar yo'qolmaydi: navbatga tushadi va keyingi muvaffaqiyatli
+      // skanerlashda avtomatik yoziladi.
+      try {
+        await pending.add(documents, message, scannedAt);
+        warn(
+          `Google Sheets ga yozib bo'lmadi: ${message}. ` +
+            `Qatorlar navbatga saqlandi va keyingi skanerlashda yoziladi.`,
+        );
+      } catch (queueErr) {
+        warn(
+          `Google Sheets ga yozib bo'lmadi: ${message}. ` +
+            `Navbatga ham saqlanmadi: ${(queueErr as Error).message}`,
+        );
+      }
     }
   }
 
@@ -240,12 +272,49 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     rowsAppended,
     flaggedRows,
     rowsSkipped,
+    rowsRecovered,
+    rowsPending: pending.rowCount,
     skuResolved: trustedBarcodes.size,
     skuFromOcr,
     catalogueEntries: catalogue.size,
     elapsedMs: Date.now() - started,
     warnings,
   };
+}
+
+/**
+ * Oldin yozilmay qolgan hujjatlarni Sheets ga yozadi.
+ *
+ * Xato bo'lsa navbat SAQLANIB QOLADI va joriy to'plamni yozish davom etadi —
+ * eski to'plamning muammosi yangi skanni to'sib qo'ymasligi kerak.
+ *
+ * @returns yozilgan qatorlar soni
+ */
+async function flushPending(
+  pending: PendingQueue,
+  sheets: SheetsWriter,
+  existing: Set<string>,
+  opts: RunOptions,
+  warn: (message: string) => void,
+): Promise<number> {
+  const documents = pending.documents();
+  if (documents.length === 0) return 0;
+
+  const batches = pending.size;
+  try {
+    // Oradan vaqt o'tgan: qatorlar qo'lda yoki boshqa kompyuterdan
+    // yozilgan bo'lishi mumkin — shuning uchun qaytadan tekshiriladi.
+    markDuplicates(documents, existing);
+    const res = await sheets.appendDocuments(documents);
+    await pending.clear();
+    opts.onProgress?.({ type: 'recovered', rows: res.rowsAppended, batches });
+    return res.rowsAppended;
+  } catch (err) {
+    warn(
+      `Navbatdagi ${pending.rowCount} ta qator hali ham yozilmadi: ${(err as Error).message}`,
+    );
+    return 0;
+  }
 }
 
 /**

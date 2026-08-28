@@ -25,6 +25,7 @@
  * qanday dekoder uni o'qiy olmaydi — ammo raqam yonidagi katakda toza turadi.
  */
 import { DOC_ID_RE } from '@barcodeer/shared';
+import { isPlausibleDocDate } from './parse.js';
 
 /**
  * Sarlavha hududi: sahifaning yuqori-o'ng burchagi.
@@ -83,7 +84,11 @@ export function parseHeaderFields(raw: string): HeaderFields {
   const dateMatch = text.match(DATE_IN_TEXT);
   if (dateMatch) {
     const [, y, mo, d, h, mi] = dateMatch;
-    docDate = `${y}-${mo}-${d} ${h!.padStart(2, '0')}:${mi}`;
+    const candidate = `${y}-${mo}-${d} ${h!.padStart(2, '0')}:${mi}`;
+    // Shakli to'g'ri, ammo qiymati mumkin bo'lmagan sana (OCR shovqini)
+    // qabul qilinmaydi — `isPlausibleDocDate` izohiga qarang.
+    if (isPlausibleDocDate(candidate)) docDate = candidate;
+    // Matndan baribir olib tashlanadi: bu raqamlar hujjat raqami emas.
     text = text.replace(dateMatch[0], ' ');
   }
 

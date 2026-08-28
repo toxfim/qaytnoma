@@ -31,6 +31,8 @@ export { SkuCatalogue } from './store/sku-catalogue.js';
 export { SkuResolver, type SkuSource, type ResolvedSku } from './store/sku-resolver.js';
 export { fetchCatalogue, type CatalogueSource } from './input/catalogue-sheet.js';
 export { DocumentIndex, type IndexEntry } from './store/index-log.js';
+export { PendingQueue, type PendingBatch } from './store/pending-batch.js';
+export { withRetry, isTransientError, type RetryOptions } from './util/retry.js';
 
 export { writeDocumentPdf, formatDate } from './output/pdf.js';
 export { SheetsWriter, LOG_SHEET_NAME, type SheetsCredentials } from './output/sheets.js';

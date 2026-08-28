@@ -12,6 +12,7 @@ Working end-to-end pipeline plus an Electron tray app. Verified on a real
 ```bash
 pnpm install                 # pnpm workspaces; native builds pre-approved in pnpm-workspace.yaml
 pnpm build                   # tsc -b across all packages
+pnpm test                    # node:test unit suite (no scanner, no network)
 pnpm --filter @barcodeer/core exec tsc --noEmit -p tsconfig.json   # typecheck one package
 
 # Pipeline, without Electron
@@ -51,8 +52,12 @@ real `file:` dependencies or electron-builder prunes them out of the asar; the
 Electron version must be passed explicitly since the staging tree has no
 `electron` dependency).
 
-There is no test suite yet. The regression check is `cli.ts ingest` against a
-saved scan compared with `docs/OCR-BENCHMARK.md`.
+`pnpm test` runs the unit suite (node:test via tsx, 66 cases, ~1.7 s) over the
+pure logic: OCR parsing, header-field extraction, column resolution, grouping,
+dedupe, validation, retry and the pending queue. Every case marked `REAL` in a
+test name reproduces a bug that actually shipped — see the comments. The suite
+covers no image code; the end-to-end regression check is still `cli.ts ingest`
+against a saved scan compared with `docs/OCR-BENCHMARK.md`.
 
 ## Measured accuracy — read before changing OCR or decoding
 
@@ -208,6 +213,24 @@ longer the mechanism for *finding* rows.
   and then attempts the transfer regardless; the authoritative answer is the
   driver's own `WIA_ERROR_PAPER_EMPTY` — if no page came through, that is when
   `NO_PAPER` is emitted.
+- **A single 503 threw away a whole scan.** Sheets and the catalogue are the
+  only network steps and they sit at the very END of the pipeline: the paper
+  has already gone through the feeder, the PDF is written, and then one
+  transient `UNAVAILABLE` lost every row. `util/retry.ts` retries ONLY
+  transient failures (429/5xx, `ECONNRESET`, `ETIMEDOUT`) with exponential
+  backoff + jitter; 403/404 still fail instantly, because those are settings
+  errors and retrying them only delays the message the user needs. What retry
+  cannot fix — no internet at all, an expired key — goes to
+  `store/pending-batch.ts`: the documents are written to `pending-batches.json`
+  and appended on the next successful scan, re-checked against the sheet's own
+  `Ид + ШК` keys first so nothing lands twice.
+- **`DOC_DATE_RE` checks digit COUNT, not date validity.** `2026-13-45 99:99`
+  passed as a well-formed date and was written to the sheet. `isPlausibleDocDate`
+  (`ocr/parse.ts`) adds range checks — including leap years — and both readers
+  use it (`parse.ts` and `ocr/header-fields.ts`, which built the date itself and
+  bypassed the parser entirely). A rejected date becomes `null`, so the
+  multi-threshold vote in `extract-page.ts` picks another reading and, failing
+  that, validation reports `DOC_DATE_MISSING`.
 - **Report the scan error without waiting for the pipeline.** `runPipeline` opens by syncing the ~23 000-row catalogue over the network, so a `Promise.all` of scan + pipeline left the tray amber for another half-minute after the scanner had already failed, hiding the cause.
 
 **Known pitfalls to design around:** scanners write incrementally, so ingesting mid-write corrupts files; higher DPI is *not* monotonically better for Code128 (test 200/300/400 empirically); ZXing has narrow tilt tolerance on scans — keep a zbar/rotate/upscale fallback; Tesseract PSM 3 returns "Empty page" on single-cell crops; if the hot folder is an SMB share, poll rather than rely on FS events.

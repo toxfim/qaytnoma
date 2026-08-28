@@ -8,6 +8,7 @@
  */
 import { auth as googleAuth, sheets as sheetsApi } from '@googleapis/sheets';
 import type { SheetsCredentials } from '../output/sheets.js';
+import { withRetry } from '../util/retry.js';
 
 export interface CatalogueSource {
   spreadsheetId: string;
@@ -44,13 +45,15 @@ export async function fetchCatalogue(
 
   const firstRow = (source.headerRows ?? 1) + 1;
   const sheet = quote(source.sheetName);
-  const res = await api.spreadsheets.values.batchGet({
-    spreadsheetId: source.spreadsheetId,
-    ranges: [
-      `${sheet}!${source.skuColumn}${firstRow}:${source.skuColumn}`,
-      `${sheet}!${source.barcodeColumn}${firstRow}:${source.barcodeColumn}`,
-    ],
-  });
+  const res = await withRetry(() =>
+    api.spreadsheets.values.batchGet({
+      spreadsheetId: source.spreadsheetId,
+      ranges: [
+        `${sheet}!${source.skuColumn}${firstRow}:${source.skuColumn}`,
+        `${sheet}!${source.barcodeColumn}${firstRow}:${source.barcodeColumn}`,
+      ],
+    }),
+  );
 
   const skus = flatten(res.data.valueRanges?.[0]?.values);
   const barcodes = flatten(res.data.valueRanges?.[1]?.values);

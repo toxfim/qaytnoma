@@ -230,6 +230,8 @@ async function process_(
 
   console.log(
     `\n${result.documents.length} hujjat, ${result.rowsAppended} qator yozildi, ` +
+      (result.rowsRecovered ? `${result.rowsRecovered} ta navbatdan tiklandi, ` : '') +
+      (result.rowsPending ? `${result.rowsPending} ta navbatda qoldi, ` : '') +
       (result.rowsSkipped ? `${result.rowsSkipped} ta takror o'tkazib yuborildi, ` : '') +
       `${result.flaggedRows} ta belgilandi. ` +
       `SKU: ${result.skuResolved} ta ishonchli manbadan, ${result.skuFromOcr} ta OCR dan ` +
@@ -279,6 +281,9 @@ function logProgress(event: ProgressEvent): void {
           (event.skipped ? `, ${event.skipped} takror o'tkazib yuborildi` : '') +
           ')',
       );
+      break;
+    case 'recovered':
+      console.log(`  navbatdan tiklandi: ${event.rows} qator (${event.batches} to'plam)`);
       break;
     case 'warning':
       console.log(`  DIQQAT: ${event.message}`);

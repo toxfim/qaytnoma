@@ -247,6 +247,8 @@ export class JobRunner {
 
     const body =
       `${result.documents.length} hujjat, ${result.rowsAppended} qator yozildi` +
+      (result.rowsRecovered ? `, shundan ${result.rowsRecovered} tasi oldingi navbatdan` : '') +
+      (result.rowsPending ? `, ${result.rowsPending} qator navbatda qoldi` : '') +
       (result.rowsSkipped ? `, ${result.rowsSkipped} ta takror o'tkazib yuborildi` : '') +
       (result.flaggedRows ? `, ${result.flaggedRows} ta tekshiruvga` : '') +
       (result.warnings.length ? `\n${result.warnings[0]}` : '');
@@ -307,6 +309,8 @@ function describe(event: ProgressEvent): string {
       return `PDF saqlandi: ${event.docId}`;
     case 'sheets':
       return `Sheets: ${event.rows} qator` + (event.skipped ? `, ${event.skipped} takror o'tkazildi` : '');
+    case 'recovered':
+      return `Navbatdan tiklandi: ${event.rows} qator`;
     case 'warning':
       return event.message;
   }

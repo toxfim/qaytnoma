@@ -11,6 +11,7 @@
     "build": "tsc -b",
     "clean": "tsc -b --clean",
     "typecheck": "tsc -b --noEmit false --pretty",
+    "test": "node --import tsx --test \"packages/core/test/**/*.test.ts\"",
     "dev": "pnpm --filter @barcodeer/tray dev",
     "front": "pnpm --filter @barcodeer/landing dev",
     "scan": "pnpm --filter @barcodeer/core cli scan",
