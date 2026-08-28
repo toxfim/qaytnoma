@@ -7,6 +7,7 @@
  *   - Windows ishga tushganda avtomatik ochiladi.
  */
 import { app, dialog, Menu, nativeImage, shell, Tray, type MenuItemConstructorOptions } from 'electron';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -42,6 +43,37 @@ function isAutoLaunchEnabled(): boolean {
   return app.isPackaged && app.getLoginItemSettings().openAtLogin;
 }
 
+/**
+ * Paketlangan ilovadagi Tesseract til fayllari papkasi.
+ *
+ * `extraResources` ularni `resources/tessdata` ga qo'yadi, konfiguratsiyaning
+ * standart qiymati esa `%APPDATA%/barcodeer/tessdata` — u papkani hech kim
+ * yaratmaydi va hech qachon to'ldirmaydi. Standart qiymatni almashtirmasak,
+ * o'rnatilgan ilovada OCR til faylini umuman topa olmaydi (ishlab chiqishda
+ * bu ko'rinmaydi: u yerda `loadConfig` repo ichidagi `.tessdata` ni topadi).
+ */
+function packagedTessdata(): string | null {
+  return app.isPackaged ? join(process.resourcesPath, 'tessdata') : null;
+}
+
+/**
+ * Til fayllari yo'qolgan bo'lsa paketdagi nusxaga qaytaradi.
+ *
+ * `config.json` standart qiymatdan ustun turadi, shuning uchun standartni
+ * to'g'rilash yetarli emas: eski o'rnatishlarda saqlanib qolgan noto'g'ri yo'l
+ * o'z-o'zidan tuzalmaydi. Yo'l mavjudligini tekshirib almashtiramiz va
+ * natijani saqlaymiz.
+ */
+async function repairTessdataPath(config: BarcodeerConfig): Promise<BarcodeerConfig> {
+  const packaged = packagedTessdata();
+  if (!packaged) return config;
+  if (existsSync(config.tessdataPath) || !existsSync(packaged)) return config;
+
+  const fixed = { ...config, tessdataPath: packaged };
+  await saveConfig(fixed).catch(() => {});
+  return fixed;
+}
+
 let tray: Tray | null = null;
 let store: Store;
 let jobs: JobRunner;
@@ -63,7 +95,12 @@ async function main(): Promise<void> {
 
   let config: BarcodeerConfig;
   try {
-    config = await loadConfig({ devRoot: ROOT.includes('apps') ? repoRoot() : undefined });
+    const packaged = packagedTessdata();
+    config = await loadConfig({
+      devRoot: ROOT.includes('apps') ? repoRoot() : undefined,
+      defaults: packaged ? { tessdataPath: packaged } : undefined,
+    });
+    config = await repairTessdataPath(config);
   } catch (err) {
     dialog.showErrorBox(
       'Sozlamalar xatosi',
