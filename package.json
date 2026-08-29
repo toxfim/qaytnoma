@@ -21,6 +21,7 @@
     "lint": "prettier --check \"**/*.{ts,json,md}\"",
     "format": "prettier --write \"**/*.{ts,json,md}\"",
     "build:installer": "pnpm build && node scripts/build-installer.mjs",
+    "build:installer:ai": "pnpm build && node scripts/build-installer.mjs qaytnoma-ai",
     "deploy:landing": "ssh root@139.162.197.219 \"bash ~/projects/qaytnoma/scripts/deploy-landing.sh\"",
     "deploy:installer": "node scripts/deploy-installer.mjs"
   },

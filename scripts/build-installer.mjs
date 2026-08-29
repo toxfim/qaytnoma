@@ -1,5 +1,5 @@
 /**
- * `qaytnoma-setup.exe` o'rnatgichini yig'adi.
+ * O'rnatgichlarni yig'adi: `node scripts/build-installer.mjs [tray|qaytnoma-ai]`.
  *
  * NEGA ALOHIDA YIG'ISH PAPKASI: pnpm har bir workspace paketiga o'z
  * `node_modules` ini yaratadi va bog'liqliklarni do'kondan simvolik havola
@@ -17,21 +17,79 @@
  * tushadi — dastur ularni offline o'qiydi (`config.tessdataPath`).
  */
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const STAGE = join(ROOT, 'build', 'app');
+
+/**
+ * Yig'iladigan dasturlar.
+ *
+ * Ikkita mustaqil o'rnatgich chiqadi va ular bir kompyuterda yonma-yon
+ * turishi mumkin, shuning uchun har biriga O'Z papkalari beriladi: umumiy
+ * `build/app` ishlatilsa, ikkinchi yig'ish birinchisining daraxtini buzardi
+ * va `npm install` har safar noldan ketardi.
+ *
+ * `landing` — tayyor `.exe` yuklash sahifasiga ko'chiriladimi. Faqat asosiy
+ * ilova ko'chiriladi: sahifadagi `meta.json` bitta dasturning versiyasi va
+ * hajmini bildiradi, ikkinchisi uni yozib yuborardi.
+ */
+const TARGETS = {
+  tray: {
+    appDir: join(ROOT, 'apps', 'tray'),
+    config: join(ROOT, 'electron-builder.yml'),
+    stage: join(ROOT, 'build', 'app'),
+    dist: join(ROOT, 'build', 'dist'),
+    resources: join(ROOT, 'build', 'resources'),
+    installer: 'qaytnoma-setup.exe',
+    packageName: 'qaytnoma',
+    productName: 'Qaytnoma',
+    description: 'Uzum qaytarim hujjatlarini skanerdan Google Sheets ga kochiradi',
+    tessdata: true,
+    landing: true,
+  },
+  'qaytnoma-ai': {
+    appDir: join(ROOT, 'apps', 'qaytnoma-ai'),
+    config: join(ROOT, 'electron-builder.qaytnoma-ai.yml'),
+    stage: join(ROOT, 'build', 'app-ai'),
+    dist: join(ROOT, 'build', 'dist-ai'),
+    resources: join(ROOT, 'build', 'resources-ai'),
+    installer: 'qaytnoma-ai-setup.exe',
+    packageName: 'qaytnoma-ai',
+    productName: 'Qaytnoma AI',
+    description: 'Qaytarim hujjatlarini Gemini orqali oqib Google Sheets ga yozadi',
+    // OCR ishlatilmaydi — til fayllari kerak emas.
+    tessdata: false,
+    landing: false,
+  },
+};
+
+const name = process.argv[2] ?? 'tray';
+const TARGET = TARGETS[name];
+if (!TARGET) {
+  console.error(`Nomalum dastur: ${name}. Mavjud: ${Object.keys(TARGETS).join(', ')}`);
+  process.exit(1);
+}
+
+const STAGE = TARGET.stage;
 /** Workspace paketlarining nusxasi — `file:` bog'liqlik sifatida ulanadi. */
 const PKGS = join(ROOT, 'build', 'pkgs');
 /** electron-builder chiqishi — oraliq fayllar bilan birga. */
-const DIST = join(ROOT, 'build', 'dist');
+const DIST = TARGET.dist;
 /** `directories.buildResources` — NSIS qo'shimchalari va ikonka shu yerdan olinadi. */
-const RES = join(ROOT, 'build', 'resources');
+const RES = TARGET.resources;
 /** Landing sahifasining yuklash papkasi — faqat tayyor `.exe` shu yerga tushadi. */
 const OUT = join(ROOT, 'apps', 'landing', 'public', 'download');
-const INSTALLER = 'qaytnoma-setup.exe';
+const INSTALLER = TARGET.installer;
 
 /** Workspace paketlari — ular npm'dan emas, diskdan ko'chiriladi. */
 const WORKSPACE = [
@@ -40,7 +98,7 @@ const WORKSPACE = [
   { name: 'core', dir: join(ROOT, 'packages', 'core'), extra: [] },
 ];
 
-const log = (msg) => console.log(`[installer] ${msg}`);
+const log = (msg) => console.log(`[${name}] ${msg}`);
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'));
@@ -59,7 +117,7 @@ function readJson(path) {
 function collectDependencies() {
   const deps = {};
   const sources = [
-    join(ROOT, 'apps', 'tray', 'package.json'),
+    join(TARGET.appDir, 'package.json'),
     ...WORKSPACE.map((w) => join(w.dir, 'package.json')),
   ];
 
@@ -123,28 +181,28 @@ function stage() {
   // Kod har safar yangilanadi, bog'liqliklar esa tegilmaydi.
   rmSync(join(STAGE, 'dist'), { recursive: true, force: true });
   rmSync(join(STAGE, 'assets'), { recursive: true, force: true });
-  cpSync(join(ROOT, 'apps', 'tray', 'dist'), join(STAGE, 'dist'), { recursive: true });
-  cpSync(join(ROOT, 'apps', 'tray', 'assets'), join(STAGE, 'assets'), { recursive: true });
+  cpSync(join(TARGET.appDir, 'dist'), join(STAGE, 'dist'), { recursive: true });
+  cpSync(join(TARGET.appDir, 'assets'), join(STAGE, 'assets'), { recursive: true });
 
   const manifestPath = join(STAGE, 'package.json');
   const previous = existsSync(manifestPath) ? readFileSync(manifestPath, 'utf8') : '';
 
-  const trayPkg = readJson(join(ROOT, 'apps', 'tray', 'package.json'));
+  const appPkg = readJson(join(TARGET.appDir, 'package.json'));
   const manifest = JSON.stringify(
-      {
-        name: 'qaytnoma',
-        productName: 'Qaytnoma',
-        version: trayPkg.version ?? '1.0.0',
-        description: 'Uzum qaytarim hujjatlarini skanerdan Google Sheets ga ko`chiradi',
-        main: 'dist/main/index.js',
-        type: 'module',
-        author: 'Uzum',
-        license: 'UNLICENSED',
-        dependencies: collectDependencies(),
-      },
-      null,
-      2,
-    );
+    {
+      name: TARGET.packageName,
+      productName: TARGET.productName,
+      version: appPkg.version ?? '1.0.0',
+      description: TARGET.description,
+      main: 'dist/main/index.js',
+      type: 'module',
+      author: 'Uzum',
+      license: 'UNLICENSED',
+      dependencies: collectDependencies(),
+    },
+    null,
+    2,
+  );
   writeFileSync(manifestPath, manifest, 'utf8');
 
   const installed = existsSync(join(STAGE, 'node_modules'));
@@ -165,8 +223,13 @@ function installDependencies(needed) {
 }
 
 function ensureTessdata() {
+  // AI ilovasida OCR yo'q — til fayllari ham talab qilinmaydi.
+  if (!TARGET.tessdata) return null;
   const src = join(ROOT, 'packages', 'core', '.tessdata');
-  if (!existsSync(join(src, 'rus.traineddata.gz')) || !existsSync(join(src, 'eng.traineddata.gz'))) {
+  if (
+    !existsSync(join(src, 'rus.traineddata.gz')) ||
+    !existsSync(join(src, 'eng.traineddata.gz'))
+  ) {
     throw new Error(
       `Tesseract til fayllari topilmadi: ${src}\n` +
         'Yuklab oling: curl -sSL -o rus.traineddata.gz https://tessdata.projectnaptha.com/4.0.0/rus.traineddata.gz',
@@ -189,7 +252,21 @@ function stageInstallerScripts() {
   for (const file of ['installer.nsh', 'install-driver.ps1']) {
     cpSync(join(ROOT, 'scripts', file), join(RES, file));
   }
-  log('NSIS qo`shimchalari ko`chirildi (installer.nsh, install-driver.ps1)');
+
+  // Ikonka dastur papkasidan olinadi, agar bor bo'lsa: `qaytnoma-ai` uni
+  // `npm run icons` bilan yaratadi va git'da saqlaydi. Asosiy ilovaning
+  // ikonkasi tarixan `build/resources` da yotadi — unga tegilmaydi.
+  for (const file of ['icon.ico', 'icon.png']) {
+    const src = join(TARGET.appDir, 'assets', file);
+    if (existsSync(src)) cpSync(src, join(RES, file));
+  }
+  if (!existsSync(join(RES, 'icon.ico'))) {
+    throw new Error(
+      `Ikonka topilmadi: ${join(RES, 'icon.ico')}\n` +
+        `Uni ${join(TARGET.appDir, 'assets')} ichiga qo'ying yoki "npm run icons" ni ishlating.`,
+    );
+  }
+  log('NSIS qo`shimchalari va ikonka ko`chirildi');
 }
 
 /**
@@ -201,9 +278,14 @@ function stageInstallerScripts() {
  * o'rnatilgan nusxadan o'qib, aniq uzatamiz.
  */
 function electronVersion() {
-  const manifest = join(ROOT, 'apps', 'tray', 'node_modules', 'electron', 'package.json');
-  if (!existsSync(manifest)) {
-    throw new Error(`Electron topilmadi: ${manifest}\nAvval "pnpm install" ni ishlating.`);
+  const candidates = [
+    join(TARGET.appDir, 'node_modules', 'electron', 'package.json'),
+    join(ROOT, 'apps', 'tray', 'node_modules', 'electron', 'package.json'),
+    join(ROOT, 'node_modules', 'electron', 'package.json'),
+  ];
+  const manifest = candidates.find((path) => existsSync(path));
+  if (!manifest) {
+    throw new Error(`Electron topilmadi: ${candidates[0]}\nAvval "pnpm install" ni ishlating.`);
   }
   return readJson(manifest).version;
 }
@@ -219,7 +301,7 @@ function buildInstaller() {
       '--win',
       '--x64',
       '--config',
-      join(ROOT, 'electron-builder.yml'),
+      TARGET.config,
       `--config.electronVersion=${version}`,
     ],
     { cwd: ROOT, stdio: 'inherit', shell: true },
@@ -258,18 +340,30 @@ function verifyUnpacked() {
   log('tekshirildi: wia-scan.ps1 app.asar.unpacked da');
 }
 
-/** Tayyor o'rnatgichni landing sahifasiga ko'chiradi. */
+/**
+ * Tayyor o'rnatgichni e'lon qiladi.
+ *
+ * Landing sahifasiga faqat asosiy ilova ko'chiriladi: sahifadagi
+ * `meta.json` bitta dasturning versiyasi va hajmini bildiradi, ikkinchisi
+ * uni yozib yuborardi. Qolganlari `build/dist-*` papkasida qoladi.
+ */
 function publish() {
   const built = join(DIST, INSTALLER);
   if (!existsSync(built)) {
     throw new Error(`O'rnatgich topilmadi: ${built}`);
   }
+  const version = readJson(join(STAGE, 'package.json')).version;
+
+  if (!TARGET.landing) {
+    log(`tayyor: ${built} (${(statSync(built).size / 1024 / 1024).toFixed(1)} MB, v${version})`);
+    return;
+  }
+
   mkdirSync(OUT, { recursive: true });
   const target = join(OUT, INSTALLER);
   cpSync(built, target);
 
   const size = statSync(target).size;
-  const version = readJson(join(STAGE, 'package.json')).version;
 
   // Sahifa hajm va versiyani shu fayldan o'qiydi — aks holda ular qo'lda
   // yozilgan matnda qolib, har yangi yig'ishdan keyin eskirardi.

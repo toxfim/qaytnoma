@@ -13,6 +13,7 @@ import { GeminiClient } from '../src/gemini/client.js';
 import { estimateUsd, imageTokens, TOKENS_PER_TILE } from '../src/gemini/cost.js';
 import { readPage } from '../src/gemini/page-reader.js';
 import { rowNumberGap } from '../src/pipeline/run.js';
+import { DEFAULT_MODEL } from '../src/config.js';
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -288,20 +289,26 @@ describe('narx', () => {
     assert.equal(imageTokens(2481, 3510), 5160);
   });
 
-  it('eng arzon model tanlangan', () => {
-    const usage = { inputTokens: 1_000_000, outputTokens: 0, thoughtTokens: 0 };
-    const lite25 = estimateUsd(usage, 'gemini-2.5-flash-lite');
-    assert.ok(lite25 < estimateUsd(usage, 'gemini-3.5-flash-lite'));
-    assert.ok(lite25 < estimateUsd(usage, 'gemini-3.7-flash'));
-    assert.equal(Number(lite25.toFixed(2)), 0.1);
+  it('standart model — MAVJUDLARI orasida eng arzoni', () => {
+    // `gemini-2.5-flash-lite` narx bo'yicha arzonroq va jadvalda hali ham
+    // turibdi, ammo yangi kalitlar uchun yopilgan (API 404 qaytaradi).
+    const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000, thoughtTokens: 0 };
+    const chosen = estimateUsd(usage, DEFAULT_MODEL);
+    assert.equal(DEFAULT_MODEL, 'gemini-3.1-flash-lite');
+    assert.ok(chosen < estimateUsd(usage, 'gemini-3.5-flash-lite'));
+    assert.ok(chosen < estimateUsd(usage, 'gemini-3.6-flash'));
+    assert.ok(chosen < estimateUsd(usage, 'gemini-3.7-flash'));
   });
 
   it('bitta sahifa bir sentdan arzon', () => {
+    // O'lchangan qiymatlar: etalon skanning 1-sahifasi uchun API 1986
+    // kirish va 879 chiqish tokeni hisobladi.
     const usd = estimateUsd(
-      { inputTokens: 5160 + 400, outputTokens: 1000, thoughtTokens: 0 },
-      'gemini-2.5-flash-lite',
+      { inputTokens: 1986, outputTokens: 879, thoughtTokens: 0 },
+      DEFAULT_MODEL,
     );
     assert.ok(usd < 0.01, `sahifa narxi ${usd}`);
+    assert.equal(Number(usd.toFixed(4)), 0.0018);
   });
 
   it('fikrlash tokenlari CHIQISH narxida hisoblanadi', () => {

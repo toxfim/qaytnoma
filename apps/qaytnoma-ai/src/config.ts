@@ -8,15 +8,22 @@
  *      umumiy bo'lsa, asosiy ilova qayta ishlagan hujjatlar bu yerda
  *      "takror" deb belgilanadi va bironta qator yozilmaydi — ikki ilovani
  *      solishtirib bo'lmay qoladi.
- *   2. Standart model — eng arzoni (`gemini-2.5-flash-lite`, $0.10 / 1M
- *      kirish). Sahifa to'liq ruxsatda 5160 token, ya'ni ~$0.0005.
+ *   2. Standart model — mavjudlari orasidagi eng arzoni
+ *      (`gemini-3.1-flash-lite`). O'lchangan: bitta sahifa ~$0.0018.
  */
 import { homedir, platform } from 'node:os';
 import { join, resolve } from 'node:path';
 import { loadConfig, saveConfig, type BarcodeerConfig } from '@barcodeer/core';
 
-/** Ushbu ilovaning eng arzon va shu vazifaga yetarli modeli. */
-export const DEFAULT_MODEL = 'gemini-2.5-flash-lite';
+/**
+ * Ushbu ilovaning eng arzon va shu vazifaga yetarli modeli.
+ *
+ * `gemini-2.5-flash-lite` narxi bo'yicha arzonroq ($0.10/$0.40) va narx
+ * jadvalida hali ham turibdi, AMMO yangi kalitlar uchun YOPILGAN: API
+ * 404 bilan "no longer available to new users" deb javob beradi. Shuning
+ * uchun standart — mavjudlari orasidagi eng arzoni.
+ */
+export const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
 
 /** Ma'lumotlar papkasi — asosiy ilovanikidan alohida. */
 export function aiDataDir(): string {

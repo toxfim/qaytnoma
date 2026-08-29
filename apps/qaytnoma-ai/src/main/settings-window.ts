@@ -81,7 +81,7 @@ function registerHandlers(store: Store, onSave: SaveHandler): void {
     try {
       await onSave({
         geminiApiKey: (payload.geminiApiKey ?? '').trim(),
-        geminiModel: payload.geminiModel || 'gemini-2.5-flash-lite',
+        geminiModel: payload.geminiModel || 'gemini-3.1-flash-lite',
         spreadsheetId: payload.spreadsheetId,
         sheetName: payload.sheetName,
         serviceAccountPath: payload.serviceAccountPath,

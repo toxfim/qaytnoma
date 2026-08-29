@@ -6,10 +6,12 @@
  *   - ikkala o'lcham 384 px dan kichik bo'lsa — 258 token;
  *   - aks holda 768x768 plitkalar, har biri 258 token.
  *
- * Shundan kelib chiqadigan asosiy xulosa bu ilova uchun: to'liq ishchi
- * sahifa (2481x3510) 20 plitka = 5160 token, ya'ni `gemini-2.5-flash-lite`
- * da $0.0005. Rasmni kichraytirib tejashga arziydigan narsa yo'q —
- * kichraytirish faqat aniqlikni yo'qotadi.
+ * Bu hisob YUQORI CHEGARA beradi: o'lchovda 2481x3431 sahifa uchun API
+ * 5160 emas, 1986 kirish tokeni hisobladi — Gemini rasmni o'zi
+ * normallashtiradi. Ya'ni haqiqiy narx bundan pastroq, va rasmni oldindan
+ * kichraytirib tejashga arziydigan narsa yo'q: u faqat aniqlikni
+ * yo'qotadi. O'lchangan sahifa narxi `gemini-3.1-flash-lite` da $0.0018,
+ * va uning katta qismi CHIQISH tokenlari (jadval qatorlari).
  */
 
 export const TOKENS_PER_TILE = 258;
@@ -30,6 +32,8 @@ export function imageTokens(width: number, height: number): number {
  * tomonga adashgani xavfsizroq.
  */
 const PRICES: Record<string, { input: number; output: number }> = {
+  // Narx jadvalida bor, lekin YANGI KALITLAR UCHUN YOPILGAN (404
+  // "no longer available to new users"). Eski kalitlar uchun qoldirilgan.
   'gemini-2.5-flash-lite': { input: 0.1, output: 0.4 },
   'gemini-2.5-flash': { input: 0.3, output: 2.5 },
   'gemini-3.1-flash-lite': { input: 0.25, output: 1.5 },
