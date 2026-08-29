@@ -11,7 +11,12 @@ export { loadImage } from './image/load.js';
 
 export { OcrEngine, type OcrMode, type OcrResult } from './ocr/engine.js';
 export { parseQuantity, parseDocDate, parseDocNumber, normalizeSku } from './ocr/parse.js';
-export { parseHeaderFields, docNumberFromId, HEADER_REGION } from './ocr/header-fields.js';
+export {
+  parseHeaderFields,
+  docNumberFromId,
+  docIdFromNumber,
+  HEADER_REGION,
+} from './ocr/header-fields.js';
 export { mergeSkuPasses, looksLikeValidSku } from './ocr/sku.js';
 
 export {
@@ -27,6 +32,7 @@ export { vlmFromConfig } from './vlm/setup.js';
 export { resolveColumns, type ColumnMap } from './layout/columns.js';
 export { groupIntoDocuments } from './pipeline/group.js';
 export { validateDocument, rowNeedsReview } from './pipeline/validate.js';
+export { markDuplicates, rowKey, duplicateIssue, type DedupeResult } from './pipeline/dedupe.js';
 export {
   runPipeline,
   type RunOptions,

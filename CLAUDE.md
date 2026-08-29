@@ -83,6 +83,56 @@ spreadsheet, 23 066 rows, zero conflicts) — `store/sku-catalogue.ts` and
 `input/catalogue-sheet.ts`. OCR remains only as a suggestion for barcodes the
 catalogue does not know, and those rows are flagged.
 
+## `apps/qaytnoma-ai` — the same app with the model in charge
+
+A SECOND, standalone tray app. Same UX (tray, on/off, Scan, hot folder,
+settings), same outputs (Sheets, PDF archive, `_log`), but the read step is
+one Gemini call per page instead of deskew → grid → ZXing → Tesseract. It
+exists to be compared against the deterministic app on the same paper, so
+**everything except the read step is shared** — grouping, SKU-from-catalogue,
+validation, dedupe, PDF, Sheets and the pending queue all come from
+`@barcodeer/core`. If the two apps differed anywhere else, a difference in
+their output would not tell you anything about the model.
+
+It keeps its own `%APPDATA%/qaytnoma-ai` (own `config.json`, own
+`documents.jsonl`, own single-instance lock, violet tray icon) so both can run
+at once. Sharing `documents.jsonl` would have made every document the other
+app already processed look like a duplicate, and the comparison would write
+nothing.
+
+**Model:** `gemini-2.5-flash-lite` by default — genuinely the cheapest at
+$0.10/M input and $0.40/M output (3.5 Flash-Lite is $0.30/$2.50, 3.7 Flash is
+$0.75/$3.75). Because it is that cheap, the page is sent at FULL working
+resolution (2481 px, 20 tiles, 5160 tokens ≈ $0.001/page): downscaling would
+save a fraction of a cent and risk losing a digit of a 13-digit barcode.
+2.5-series models are not on the Interactions API, so this app talks to
+`models:generateContent` — which also accepts 3.x, so switching models needs
+no code change. Thinking is fully off (`thinkingBudget: 0`); on 3.x the client
+falls back to the lowest `thinkingLevel` the model allows.
+
+**Three independent checks on the model** (`src/pipeline/run.ts`) — the design
+assumes the model is wrong until something agrees with it:
+
+1. A barcode must be exactly 13 digits, and the catalogue (23 066 entries)
+   must know it. An invented or misread code resolves to nothing and the row
+   is flagged.
+2. `№` must run without gaps. The model's most likely failure is silently
+   dropping a row — 26 rows come back as 25 and everything *looks* right.
+   The row numbers catch it even when `Итого` is unreadable.
+3. Σ quantities must equal `Итого` (core's validation, unchanged).
+
+Rows are NOT marked `VLM_SOURCED` here: in this app every value comes from the
+model, so flagging all of them would make `⚠` meaningless. Trust comes from the
+three checks above instead.
+
+```bash
+pnpm ai check                          # settings, key, per-page cost estimate
+pnpm ai page <image>                   # one page, raw model output + tokens
+pnpm ai ingest <dir> --no-sheets       # full pipeline on saved scans
+pnpm ai ingest <dir> --model gemini-3.7-flash   # compare models
+pnpm dev:ai                            # the tray app
+```
+
 ## Gemini — a fallback, never the pipeline
 
 `geminiMode` is `off` by default and the model is **not** part of the normal
@@ -328,6 +378,7 @@ document inside the same batch is caught.
 
 ```
 apps/tray/          Electron: tray icon, on/off, Scan button, settings window, hot folder
+apps/qaytnoma-ai/   The same app, but Gemini reads the page instead of the grid+OCR pipeline
 apps/landing/       Static download page (from the Claude Design mockup)
 packages/shared/    domain types, constants, validation regexes
 packages/scanner/   WIA bridge (PowerShell script + typed wrapper)

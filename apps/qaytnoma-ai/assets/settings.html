@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="uz">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>Qaytnoma AI — sozlamalar</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #1a1d21;
+        --muted: #6b7280;
+        --border: #d7dbe0;
+        --accent: #6d4aff;
+        --danger: #b91c1c;
+        --field: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1b1e23;
+          --fg: #e8eaed;
+          --muted: #9aa3ad;
+          --border: #363b43;
+          --accent: #a78bfa;
+          --danger: #f87171;
+          --field: #23272e;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 20px 24px 88px;
+        font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 19px;
+      }
+      .lead {
+        margin: 0 0 20px;
+        color: var(--muted);
+      }
+      fieldset {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px;
+        margin: 0 0 16px;
+      }
+      legend {
+        padding: 0 6px;
+        font-weight: 600;
+      }
+      label {
+        display: block;
+        margin: 0 0 14px;
+      }
+      label:last-child {
+        margin-bottom: 0;
+      }
+      label > span {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 500;
+      }
+      input[type='text'],
+      input[type='password'],
+      input[type='number'] {
+        width: 100%;
+        padding: 7px 10px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: var(--field);
+        color: var(--fg);
+        font: inherit;
+      }
+      input:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: -1px;
+      }
+      small {
+        display: block;
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      code {
+        font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+        font-size: 12px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: flex-end;
+      }
+      .row > label {
+        margin-bottom: 0;
+      }
+      .check {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      button {
+        padding: 7px 14px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: var(--field);
+        color: var(--fg);
+        font: inherit;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      button:hover {
+        border-color: var(--accent);
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+        font-weight: 600;
+      }
+      footer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 14px 24px;
+        border-top: 1px solid var(--border);
+        background: var(--bg);
+      }
+      #status {
+        flex: 1;
+        font-size: 13px;
+      }
+      #status.err {
+        color: var(--danger);
+      }
+      #status.ok {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Qaytnoma AI sozlamalari</h1>
+    <p class="lead">
+      Skanerlangan sahifani Gemini o'qiydi, natija Google Sheets'ga yoziladi va hujjat PDF sifatida
+      saqlanadi.
+    </p>
+
+    <form id="form">
+      <fieldset>
+        <legend>Gemini</legend>
+        <p style="margin: 0 0 12px; color: var(--muted)">
+          Bu ilovada jadval to'ri ham, OCR ham ishlatilmaydi — sahifa rasmini to'g'ridan-to'g'ri
+          model o'qiydi. Bitta sahifa <code>gemini-2.5-flash-lite</code> da taxminan
+          <code>$0.001</code> turadi.
+        </p>
+        <label>
+          <span>API kaliti</span>
+          <div class="row">
+            <input type="password" name="geminiApiKey" autocomplete="off" required />
+            <button type="button" id="testGemini">Tekshirish</button>
+          </div>
+          <small>aistudio.google.com/apikey dan olinadi.</small>
+        </label>
+        <label>
+          <span>Model</span>
+          <input type="text" name="geminiModel" />
+          <small>
+            <code>gemini-2.5-flash-lite</code> — eng arzoni ($0.10 / 1M kirish). Aniqroq natija
+            kerak bo'lsa <code>gemini-3.7-flash</code>.
+          </small>
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Google Sheets</legend>
+        <label>
+          <span>Spreadsheet ID</span>
+          <input type="text" name="spreadsheetId" required />
+          <small>Havoladagi <code>/d/</code> va <code>/edit</code> orasidagi qism.</small>
+        </label>
+        <label>
+          <span>Varaq nomi</span>
+          <input type="text" name="sheetName" required />
+        </label>
+        <label>
+          <span>Service account kaliti</span>
+          <div class="row">
+            <input type="text" name="serviceAccountPath" required />
+            <button type="button" data-pick="file" data-target="serviceAccountPath">
+              Tanlash…
+            </button>
+          </div>
+          <small
+            >Ushbu service account e-pochtasiga jadvalga tahrirlash huquqi berilgan bo'lishi
+            kerak.</small
+          >
+        </label>
+        <div class="check">
+          <input type="checkbox" name="flagColumn" id="flagColumn" />
+          <label for="flagColumn" style="margin: 0"
+            >Tekshirish kerak bo'lgan qatorlarni <code>⚠</code> bilan belgilash</label
+          >
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Fayllar</legend>
+        <label>
+          <span>PDF arxivi papkasi</span>
+          <div class="row">
+            <input type="text" name="invoicesRoot" required />
+            <button type="button" data-pick="folder" data-target="invoicesRoot">Tanlash…</button>
+          </div>
+        </label>
+        <label>
+          <span>Kuzatiladigan papka (ixtiyoriy)</span>
+          <div class="row">
+            <input type="text" name="hotFolder" placeholder="Ishlatilmaydi" />
+            <button type="button" data-pick="folder" data-target="hotFolder">Tanlash…</button>
+            <button type="button" data-clear="hotFolder">Tozalash</button>
+          </div>
+          <small
+            >Skanerning o'z tugmasi orqali chiqqan fayllar shu papkaga tushsa, avtomatik qayta
+            ishlanadi.</small
+          >
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Uzum katalogi (Баркод &rarr; Скю)</legend>
+        <p style="margin: 0 0 12px; color: var(--muted)">
+          Katalog SKU ni shtrix-kod bo'yicha beradi va shu bilan birga <b>modelni tekshiradi</b>:
+          katalogda topilmagan shtrix-kod modelning xato o'qiganidan darak beradi va qator
+          <code>&#9888;</code> bilan belgilanadi.
+        </p>
+        <label>
+          <span>Katalog jadvali ID</span>
+          <input type="text" name="catalogueSpreadsheetId" placeholder="Ishlatilmaydi" />
+        </label>
+        <label>
+          <span>Varaq nomi</span>
+          <input type="text" name="catalogueSheetName" />
+        </label>
+        <div class="row">
+          <label style="flex: 1">
+            <span>Скю ustuni</span>
+            <input type="text" name="catalogueSkuColumn" />
+          </label>
+          <label style="flex: 1">
+            <span>Баркод ustuni</span>
+            <input type="text" name="catalogueBarcodeColumn" />
+          </label>
+          <label style="flex: 1">
+            <span>Yangilash oralig'i (soat)</span>
+            <input type="number" name="catalogueMaxAgeHours" min="0" step="1" />
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Skaner</legend>
+        <label>
+          <span>Qurilma nomi</span>
+          <input type="text" name="scannerName" />
+          <small>Nomning bir qismi yetarli, masalan <code>DS-530</code>.</small>
+        </label>
+        <label>
+          <span>Ruxsat (DPI)</span>
+          <input type="number" name="scanDpi" min="100" max="1200" step="50" />
+          <small>300 tavsiya etiladi — model uchun ham shu yetarli.</small>
+        </label>
+      </fieldset>
+
+      <footer>
+        <span id="status"></span>
+        <button type="button" id="test">Sheets ulanishi</button>
+        <button type="button" id="cancel">Bekor qilish</button>
+        <button type="submit" class="primary">Saqlash</button>
+      </footer>
+    </form>
+
+    <script>
+      const api = window.qaytnomaAi;
+      const form = document.getElementById('form');
+      const status = document.getElementById('status');
+
+      const setStatus = (text, kind) => {
+        status.textContent = text;
+        status.className = kind ?? '';
+      };
+
+      const load = async () => {
+        const cfg = await api.load();
+        for (const [key, value] of Object.entries(cfg)) {
+          const field = form.elements[key];
+          if (!field) continue;
+          if (field.type === 'checkbox') field.checked = Boolean(value);
+          else field.value = value ?? '';
+        }
+      };
+
+      const save = async () => {
+        const data = Object.fromEntries(new FormData(form));
+        const res = await api.save({
+          ...data,
+          flagColumn: form.elements.flagColumn.checked,
+          scanDpi: Number(data.scanDpi) || 300,
+          catalogueMaxAgeHours: Number(data.catalogueMaxAgeHours) || 24,
+        });
+        if (!res.ok) setStatus(res.error ?? 'Saqlab bo`lmadi', 'err');
+        return res.ok;
+      };
+
+      form.addEventListener('click', async (event) => {
+        const button = event.target.closest('button');
+        if (!button) return;
+
+        if (button.dataset.pick) {
+          const picked =
+            button.dataset.pick === 'file'
+              ? await api.pickFile('Fayl tanlang')
+              : await api.pickFolder('Papka tanlang');
+          if (picked) form.elements[button.dataset.target].value = picked;
+        }
+        if (button.dataset.clear) form.elements[button.dataset.clear].value = '';
+      });
+
+      document.getElementById('test').addEventListener('click', async () => {
+        setStatus('Tekshirilmoqda…');
+        const res = await api.testSheets();
+        setStatus(res.message, res.ok ? 'ok' : 'err');
+      });
+
+      // Kalitni tekshirish uchun avval saqlanadi: so'rovni asosiy jarayon
+      // saqlangan sozlama bo'yicha yuboradi.
+      document.getElementById('testGemini').addEventListener('click', async () => {
+        setStatus('Saqlanmoqda…');
+        if (!(await save())) return;
+        setStatus('Modelga so`rov yuborilmoqda…');
+        const res = await api.testGemini();
+        setStatus(res.message, res.ok ? 'ok' : 'err');
+      });
+
+      document.getElementById('cancel').addEventListener('click', () => api.close());
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        setStatus('Saqlanmoqda…');
+        if (await save()) {
+          setStatus('Saqlandi', 'ok');
+          setTimeout(() => api.close(), 500);
+        }
+      });
+
+      load();
+    </script>
+  </body>
+</html>
