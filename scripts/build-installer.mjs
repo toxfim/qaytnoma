@@ -39,9 +39,9 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
  * `build/app` ishlatilsa, ikkinchi yig'ish birinchisining daraxtini buzardi
  * va `npm install` har safar noldan ketardi.
  *
- * `landing` — tayyor `.exe` yuklash sahifasiga ko'chiriladimi. Faqat asosiy
- * ilova ko'chiriladi: sahifadagi `meta.json` bitta dasturning versiyasi va
- * hajmini bildiradi, ikkinchisi uni yozib yuborardi.
+ * `landing` — tayyor `.exe` yuklash sahifasiga ko'chiriladimi. Ikkalasi ham
+ * ko'chiriladi; `meta.json` esa dastur nomi bo'yicha kalitlangan (`apps`),
+ * shuning uchun bir dasturni qayta yig'ish ikkinchisining yozuvini o'chirmaydi.
  */
 const TARGETS = {
   tray: {
@@ -69,7 +69,7 @@ const TARGETS = {
     description: 'Qaytarim hujjatlarini Gemini orqali oqib Google Sheets ga yozadi',
     // OCR ishlatilmaydi — til fayllari kerak emas.
     tessdata: false,
-    landing: false,
+    landing: true,
   },
 };
 
@@ -341,11 +341,39 @@ function verifyUnpacked() {
 }
 
 /**
- * Tayyor o'rnatgichni e'lon qiladi.
+ * Sahifadagi `meta.json` ni yangilaydi.
  *
- * Landing sahifasiga faqat asosiy ilova ko'chiriladi: sahifadagi
- * `meta.json` bitta dasturning versiyasi va hajmini bildiradi, ikkinchisi
- * uni yozib yuborardi. Qolganlari `build/dist-*` papkasida qoladi.
+ * Fayl AVVAL O'QILADI va faqat shu dasturning yozuvi almashtiriladi: ikkita
+ * o'rnatgich alohida-alohida yig'iladi (`pnpm build:installer`, keyin
+ * `build:installer:ai`), butun faylni qaytadan yozish esa oldingi yig'ilgan
+ * dasturni sahifadan yo'qotardi.
+ */
+function writeMeta(version, size) {
+  const path = join(OUT, 'meta.json');
+  let meta = { apps: {} };
+  if (existsSync(path)) {
+    try {
+      const parsed = readJson(path);
+      // Eski, bitta dasturga mo'ljallangan tekis format ham uchraydi —
+      // undan tiklab o'tirmaymiz, keyingi yig'ish o'z yozuvini qo'shadi.
+      if (parsed && typeof parsed.apps === 'object' && parsed.apps) meta = parsed;
+    } catch {
+      /* buzuq meta.json — noldan yoziladi */
+    }
+  }
+  meta.apps[TARGET.packageName] = {
+    installer: INSTALLER,
+    version,
+    sizeBytes: size,
+    builtAt: new Date().toISOString(),
+  };
+  writeFileSync(path, JSON.stringify(meta, null, 2), 'utf8');
+}
+
+/**
+ * Tayyor o'rnatgichni e'lon qiladi — `.exe` ni yuklash papkasiga ko'chiradi
+ * va `meta.json` dagi o'z yozuvini yangilaydi. `landing: false` bo'lsa fayl
+ * `build/dist-*` da qoladi.
  */
 function publish() {
   const built = join(DIST, INSTALLER);
@@ -367,11 +395,7 @@ function publish() {
 
   // Sahifa hajm va versiyani shu fayldan o'qiydi — aks holda ular qo'lda
   // yozilgan matnda qolib, har yangi yig'ishdan keyin eskirardi.
-  writeFileSync(
-    join(OUT, 'meta.json'),
-    JSON.stringify({ version, sizeBytes: size, builtAt: new Date().toISOString() }, null, 2),
-    'utf8',
-  );
+  writeMeta(version, size);
 
   log(`tayyor: ${target} (${(size / 1024 / 1024).toFixed(1)} MB, v${version})`);
 }

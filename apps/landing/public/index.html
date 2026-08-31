@@ -26,6 +26,7 @@
         </div>
         <nav class="nav">
           <a href="#sozlash" data-t="navSetup"></a>
+          <a href="#nashrlar" data-t="navEditions"></a>
           <a href="#ornatish" data-t="navInstall"></a>
         </nav>
         <div class="lang" role="group" aria-label="Til / Язык">
@@ -59,6 +60,7 @@
             <div class="hero__meta">
               <strong data-t="metaTop"></strong>
               <span data-t="metaBottom"></span>
+              <a class="hero__alt" href="#nashrlar" data-t="heroAlt"></a>
             </div>
           </div>
         </div>
@@ -365,6 +367,39 @@
             <dt data-th="q5"></dt><dd data-th="a5"></dd>
             <dt data-th="q6"></dt><dd data-th="a6"></dd>
           </dl>
+        </div>
+      </section>
+
+      <!-- Ikki nashr. Bir xil ish, sahifani o'qish usuli boshqacha; ikkala
+           o'rnatgich ham `download/` da yotadi. Versiya va hajm qo'lda
+           yozilmaydi — `download/meta.json` dan keladi (app.js). -->
+      <section class="section wrap" id="nashrlar">
+        <h2 class="section__title" data-t="edTitle"></h2>
+        <p class="install__lede" data-t="edLede"></p>
+        <div class="editions">
+          <article class="edition">
+            <div class="edition__head">
+              <h3 class="edition__name">Qaytnoma</h3>
+              <span class="edition__tag edition__tag--main" data-t="edMainTag"></span>
+            </div>
+            <p class="edition__body" data-t="edMainB"></p>
+            <a class="btn-outline" href="download/qaytnoma-setup.exe" download data-t="cta2"></a>
+            <span class="edition__meta" data-t="metaBottom"></span>
+          </article>
+          <article class="edition">
+            <div class="edition__head">
+              <h3 class="edition__name">Qaytnoma AI</h3>
+              <span class="edition__tag edition__tag--ai" data-t="edAiTag"></span>
+            </div>
+            <p class="edition__body" data-t="edAiB"></p>
+            <a
+              class="btn-outline"
+              href="download/qaytnoma-ai-setup.exe"
+              download
+              data-t="ctaAi"
+            ></a>
+            <span class="edition__meta" data-t="metaAi"></span>
+          </article>
         </div>
       </section>
 

@@ -19,6 +19,7 @@
   var COPY = {
     uz: {
       navSetup: "Sozlash yo'riqnomasi",
+      navEditions: 'Nashrlar',
       navInstall: "O'rnatish",
       badge: 'Windows uchun ilova',
       h1: "Skaner ishlaydi — ma'lumot jadvalga tushadi.",
@@ -27,6 +28,7 @@
       cta2: 'Yuklab olish (.exe)',
       metaTop: '.exe · Windows 10/11 · 64-bit',
       metaBottom: 'Versiya 1.0.0 · 132 MB',
+      heroAlt: "Sahifani sun'iy intellekt o'qiydigan nashr ham bor →",
       featTitle: 'Nima qiladi',
       f1t: 'Skanerni kuzatadi',
       f1b: "Fonda ishlaydi. Skaner hujjatni o'qishi bilan ilova uni darhol qabul qiladi.",
@@ -129,6 +131,18 @@
       q6: 'Sozlamalar qayerda saqlanadi?',
       a6: "<code>%APPDATA%\\barcodeer\\config.json</code> faylida. Ilovani boshqa kompyuterga ko'chirganda shu faylni va service account <code>.json</code> ini olib o'ting.",
 
+      edTitle: 'Ikki nashr',
+      edLede:
+        "Ikkalasi bir xil ish qiladi va bir xil jadvalga yozadi — farqi sahifani o'qish usulida. Ikkovi bitta kompyuterda yonma-yon tura oladi, sozlamalari alohida saqlanadi.",
+      edMainTag: 'Asosiy',
+      edMainB:
+        "Sahifani kompyuterning o'zi o'qiydi: shtrix-kod dekoderi va OCR. Internet faqat Google Sheets uchun kerak, o'qishning o'zi bepul.",
+      edAiTag: 'Sinov nashri',
+      edAiB:
+        "Sahifani Gemini o'qiydi. Google AI Studio dan API kalit kerak va har bir sahifa taxminan $0,0014 turadi. Asosiy nashr bilan natijalarni solishtirish uchun.",
+      ctaAi: 'Qaytnoma AI (.exe)',
+      metaAi: '',
+
       instTitle: "O'rnatish",
       instLede:
         "To'rt qadam, taxminan bir daqiqa. Ilovaning o'zi uchun administrator huquqi kerak emas — u faqat skaner drayveri o'rnatilsa so'raladi.",
@@ -145,6 +159,7 @@
     },
     ru: {
       navSetup: 'Настройка',
+      navEditions: 'Редакции',
       navInstall: 'Установка',
       badge: 'Приложение для Windows',
       h1: 'Сканер работает — данные попадают в таблицу.',
@@ -153,6 +168,7 @@
       cta2: 'Скачать (.exe)',
       metaTop: '.exe · Windows 10/11 · 64-bit',
       metaBottom: 'Версия 1.0.0 · 132 МБ',
+      heroAlt: 'Есть и редакция, где страницу читает ИИ →',
       featTitle: 'Что делает',
       f1t: 'Следит за сканером',
       f1b: 'Работает в фоне. Как только сканер считывает документ, приложение сразу его принимает.',
@@ -255,6 +271,18 @@
       q6: 'Где хранятся настройки?',
       a6: 'В файле <code>%APPDATA%\\barcodeer\\config.json</code>. При переносе на другой компьютер возьмите этот файл и <code>.json</code> сервисного аккаунта.',
 
+      edTitle: 'Две редакции',
+      edLede:
+        'Обе делают одно и то же и пишут в одну таблицу — отличается способ чтения страницы. Их можно держать на одном компьютере рядом, настройки хранятся отдельно.',
+      edMainTag: 'Основная',
+      edMainB:
+        'Страницу читает сам компьютер: декодер штрихкодов и OCR. Интернет нужен только для Google Sheets, само чтение бесплатное.',
+      edAiTag: 'Пробная',
+      edAiB:
+        'Страницу читает Gemini. Нужен API-ключ из Google AI Studio, каждая страница стоит примерно $0,0014. Чтобы сравнить результат с основной редакцией.',
+      ctaAi: 'Qaytnoma AI (.exe)',
+      metaAi: '',
+
       instTitle: 'Установка',
       instLede:
         'Четыре шага, около минуты. Для самого приложения права администратора не нужны — они запрашиваются только при установке драйвера сканера.',
@@ -322,28 +350,47 @@
   apply(initial());
 
   /*
-   * O'rnatgichning versiyasi va hajmi `download/meta.json` dan olinadi —
-   * uni `scripts/build-installer.mjs` har yig'ishda yozadi. Fayl bo'lmasa
-   * (masalan o'rnatgich hali yig'ilmagan) yuqoridagi matn o'z holicha qoladi.
+   * Har bir o'rnatgichning versiyasi va hajmi `download/meta.json` dan
+   * olinadi — uni `scripts/build-installer.mjs` har yig'ishda yangilaydi.
+   * Fayl bo'lmasa (o'rnatgich hali yig'ilmagan) sahifadagi matn o'z holicha
+   * qoladi, havolalar esa baribir ishlaydi.
    */
+  function setCopy(key, uz, ru) {
+    COPY.uz[key] = uz;
+    COPY.ru[key] = ru;
+    var lang = document.documentElement.lang === 'ru' ? 'ru' : 'uz';
+    var slots = document.querySelectorAll('[data-t="' + key + '"]');
+    for (var i = 0; i < slots.length; i++) slots[i].textContent = COPY[lang][key];
+  }
+
+  function describe(app, key) {
+    if (!app || !app.version) return;
+    var mb = Math.round(app.sizeBytes / 1024 / 1024);
+    setCopy(key, 'Versiya ' + app.version + ' · ' + mb + ' MB', 'Версия ' + app.version + ' · ' + mb + ' МБ');
+  }
+
   fetch('download/meta.json', { cache: 'no-store' })
     .then(function (res) {
       if (!res.ok) throw new Error(String(res.status));
       return res.json();
     })
     .then(function (meta) {
-      var mb = Math.round(meta.sizeBytes / 1024 / 1024);
+      // Eski format bitta dasturni tekis maydonlarda saqlagan. Sahifa
+      // o'rnatgichlardan oldin ham yangilanadi, shuning uchun ikkalasi ham
+      // tushuniladi — aks holda yangi sahifa eski `meta.json` bilan
+      // versiyani umuman ko'rsatmay qolardi.
+      var apps = meta.apps || { qaytnoma: meta };
 
-      COPY.uz.metaBottom = 'Versiya ' + meta.version + ' · ' + mb + ' MB';
-      COPY.ru.metaBottom = 'Версия ' + meta.version + ' · ' + mb + ' МБ';
-      COPY.uz.foot = 'Windows 10/11 · 64-bit · Versiya ' + meta.version;
-      COPY.ru.foot = 'Windows 10/11 · 64-bit · Версия ' + meta.version;
+      describe(apps.qaytnoma, 'metaBottom');
+      describe(apps['qaytnoma-ai'], 'metaAi');
 
-      var lang = document.documentElement.lang === 'ru' ? 'ru' : 'uz';
-      var slot = document.querySelector('[data-t="metaBottom"]');
-      if (slot) slot.textContent = COPY[lang].metaBottom;
-      var foot = document.querySelector('[data-t="foot"]');
-      if (foot) foot.textContent = COPY[lang].foot;
+      if (apps.qaytnoma && apps.qaytnoma.version) {
+        setCopy(
+          'foot',
+          'Windows 10/11 · 64-bit · Versiya ' + apps.qaytnoma.version,
+          'Windows 10/11 · 64-bit · Версия ' + apps.qaytnoma.version,
+        );
+      }
     })
     .catch(function () {
       /* meta.json yo'q — sahifadagi matn o'zgarmaydi */

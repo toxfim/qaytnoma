@@ -14,8 +14,18 @@ public/                       ← veb-ildiz, shuni hostingga qo'ying
   assets/styles.css           ← maketdagi inline uslublar + yo'riqnoma uslublari
   assets/app.js               ← UZ/RU almashtirish (COPY obyekti), meta.json o'qish
   assets/icon.png
-  download/qaytnoma-setup.exe ← `pnpm build:installer` natijasi (gitignored)
-  download/meta.json          ← versiya va hajm, o'rnatgich bilan birga yoziladi
+  download/qaytnoma-setup.exe    ← `pnpm build:installer` natijasi (gitignored)
+  download/qaytnoma-ai-setup.exe ← `pnpm build:installer:ai` natijasi
+  download/meta.json             ← har ikkala dasturning versiyasi va hajmi
+```
+
+Sahifada ikkita yuklab olish bor (_Ikki nashr_ bo'limi): asosiy `Qaytnoma` va
+`Qaytnoma AI`. `meta.json` dastur nomi bo'yicha kalitlangan, chunki
+o'rnatgichlar alohida-alohida yig'iladi va butun faylni qayta yozish
+ikkinchisini sahifadan yo'qotardi:
+
+```json
+{ "apps": { "qaytnoma": { "installer": "…exe", "version": "1.0.5", "sizeBytes": 1 } } }
 ```
 
 `download/` papkasi `.gitignore` da — o'rnatgich har safar qayta yig'iladi va
@@ -56,8 +66,10 @@ pnpm deploy:landing       # = ssh ydev 'bash ~/projects/qaytnoma/scripts/deploy-
 O'rnatgichni yangilash — repo'dan tashqarida, to'g'ridan-to'g'ri veb-ildizga:
 
 ```bash
-pnpm build:installer
-pnpm deploy:installer      # scp download/{qaytnoma-setup.exe,meta.json} → server
+pnpm build:installer            # Qaytnoma
+pnpm build:installer:ai         # Qaytnoma AI
+pnpm deploy:installer           # meta.json dagi HAMMA dastur + meta.json
+pnpm deploy:installer qaytnoma-ai   # faqat bittasi — 132 MB ni bekorga haydamaslik uchun
 ```
 
 DNS: `qaytnoma.tez-agent.uz` → A `139.162.197.219` (ahost, DNS-хостинг →
@@ -66,5 +78,6 @@ DNS-менеджер; nameserverlar rdns1-3.ahost.uz). Sertifikat:
 marta ishga tushiradi (jurnal `/var/log/qaytnoma-https.log`), keyin
 certbot'ning o'z taymeri yangilab turadi.
 
-Versiya raqami `apps/tray/package.json` dan olinadi va `meta.json` orqali
-sahifaga tushadi; `app.js` dagi `metaBottom` / `foot` faqat zaxira matn.
+Versiya raqamlari `apps/tray/package.json` va `apps/qaytnoma-ai/package.json`
+dan olinadi va `meta.json` orqali sahifaga tushadi; `app.js` dagi
+`metaBottom` / `metaAi` / `foot` faqat zaxira matn.

@@ -1,5 +1,9 @@
 /**
- * O'rnatgichni serverga chiqaradi.
+ * O'rnatgichlarni serverga chiqaradi: `node scripts/deploy-installer.mjs [dastur]`.
+ *
+ * Argumentsiz — `meta.json` dagi barcha dasturlar (`qaytnoma`, `qaytnoma-ai`).
+ * Bitta nom berilsa faqat o'sha yuklanadi: ikkinchisini qayta yuborish 130 MB
+ * ni bekorga haydash demak.
  *
  * NEGA TO'G'RIDAN-TO'G'RI `scp` EMAS: `scp` faylni joyiga o'sha zahoti yoza
  * boshlaydi, nginx esa o'sha paytda yarim yozilgan `.exe` ni tarqatishda davom
@@ -12,9 +16,9 @@
  * eski, yo yangi faylni oladi, oraliq holat yo'q. Yuklab olish jarayonida
  * bo'lgan mijozlar esa eski inode'dan o'qishda davom etadi va uzilmaydi.
  *
- * TARTIB HAM MUHIM: avval `.exe`, keyin `meta.json`. Sahifa versiya va hajmni
- * `meta.json` dan o'qiydi, ya'ni u hali yuklanmagan versiyani e'lon qilmasligi
- * kerak. Eski skript aksincha qilardi — `meta.json` birinchi ketardi.
+ * TARTIB HAM MUHIM: avval `.exe` lar, keyin `meta.json`. Sahifa versiya va
+ * hajmni `meta.json` dan o'qiydi, ya'ni u hali yuklanmagan versiyani e'lon
+ * qilmasligi kerak. Eski skript aksincha qilardi — `meta.json` birinchi ketardi.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
@@ -25,8 +29,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const LOCAL = join(ROOT, 'apps', 'landing', 'public', 'download');
 const HOST = 'root@139.162.197.219';
 const REMOTE = '/var/www/qaytnoma.tez-agent.uz/download';
-const URL = 'https://qaytnoma.tez-agent.uz/download/qaytnoma-setup.exe';
-const INSTALLER = 'qaytnoma-setup.exe';
+const SITE = 'https://qaytnoma.tez-agent.uz';
 
 const log = (msg) => console.log(`[deploy] ${msg}`);
 
@@ -49,14 +52,14 @@ function upload(name) {
  * Egasi va huquqlari `mv` dan OLDIN to'g'rilanadi: `mv` faylni o'z egasi bilan
  * ko'chiradi, `scp` esa uni root nomidan yaratadi.
  */
-function publish() {
+function publish(names) {
+  const parts = names.map(partName).join(' ');
   const commands = [
     `cd ${REMOTE}`,
-    `chown www-data:www-data ${partName(INSTALLER)} ${partName('meta.json')}`,
-    `chmod 644 ${partName(INSTALLER)} ${partName('meta.json')}`,
-    `mv -f ${partName(INSTALLER)} ${INSTALLER}`,
-    `mv -f ${partName('meta.json')} meta.json`,
-    `ls -l ${INSTALLER} meta.json`,
+    `chown www-data:www-data ${parts}`,
+    `chmod 644 ${parts}`,
+    ...names.map((name) => `mv -f ${partName(name)} ${name}`),
+    `ls -l ${names.join(' ')}`,
   ].join(' && ');
 
   log('serverda joyiga qo`yilmoqda…');
@@ -64,25 +67,36 @@ function publish() {
 }
 
 /** Sayt haqiqatan yangi faylni tarqatayotganini tekshiradi. */
-async function verify(expectedSize) {
-  log('sayt tekshirilmoqda…');
-  const res = await fetch(URL, { method: 'HEAD', cache: 'no-store' });
-  if (!res.ok) throw new Error(`Sayt ${res.status} qaytardi`);
+async function verify(name, expectedSize) {
+  const url = `${SITE}/download/${name}`;
+  const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+  if (!res.ok) throw new Error(`${url} — sayt ${res.status} qaytardi`);
 
   const served = Number(res.headers.get('content-length'));
   if (served !== expectedSize) {
     throw new Error(
-      `Saytdagi hajm mos kelmadi: ${served} ≠ ${expectedSize}.\n` +
+      `${name}: saytdagi hajm mos kelmadi: ${served} ≠ ${expectedSize}.\n` +
         'Fayl to`liq ko`chmagan bo`lishi mumkin — qayta yuboring.',
     );
   }
-  log(`tekshirildi: ${served} bayt tarqatilmoqda`);
+  log(`tekshirildi: ${name} — ${served} bayt tarqatilmoqda`);
 }
 
 const meta = JSON.parse(readFileSync(join(LOCAL, 'meta.json'), 'utf8'));
+const only = process.argv[2];
+const entries = Object.entries(meta.apps ?? {}).filter(([key]) => !only || key === only);
 
-upload(INSTALLER);
+if (entries.length === 0) {
+  const known = Object.keys(meta.apps ?? {}).join(', ') || '(bo`sh)';
+  console.error(`Yuklanadigan dastur topilmadi. meta.json dagilar: ${known}`);
+  process.exit(1);
+}
+
+for (const [, app] of entries) upload(app.installer);
 upload('meta.json');
-publish();
-await verify(meta.sizeBytes);
-log(`tayyor: v${meta.version} → https://qaytnoma.tez-agent.uz`);
+publish([...entries.map(([, app]) => app.installer), 'meta.json']);
+
+log('sayt tekshirilmoqda…');
+for (const [, app] of entries) await verify(app.installer, app.sizeBytes);
+
+log(`tayyor: ${entries.map(([key, app]) => `${key} v${app.version}`).join(', ')} → ${SITE}`);
