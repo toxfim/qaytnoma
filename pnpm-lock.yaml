@@ -26,6 +26,31 @@ importers:
 
   apps/landing: {}
 
+  apps/qaytnoma-ai:
+    dependencies:
+      '@barcodeer/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@barcodeer/scanner':
+        specifier: workspace:*
+        version: link:../../packages/scanner
+      '@barcodeer/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      chokidar:
+        specifier: ^4.0.3
+        version: 4.0.3
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
+      zod:
+        specifier: ^4.1.13
+        version: 4.4.3
+    devDependencies:
+      electron:
+        specifier: ^40.0.0
+        version: 40.10.6(supports-color@7.2.0)
+
   apps/tray:
     dependencies:
       '@barcodeer/core':

@@ -13,6 +13,7 @@
 .OUTPUTS
   {"ok":true,"pages":["...page_001.bmp"],"dpi":300,"device":"EPSON DS-530II","elapsedMs":1234}
   {"ok":false,"error":"...","code":"NO_DEVICE","pages":[]}
+  {"ok":false,"error":"...","code":"DEVICE_BUSY","pages":[]}
 #>
 [CmdletBinding()]
 param(
@@ -28,6 +29,9 @@ param(
   # A4 o'lchami (dyuym)
   [double] $PageWidthIn  = 8.27,
   [double] $PageHeightIn = 11.70,
+  # Qurilma band bo'lsa umumiy kutish byudjeti (soniya). O'lchangan: uzilgan
+  # seansdan keyin DS-530II ~82 s davomida "busy" qaytardi, keyin o'zi bo'shadi.
+  [int]    $BusyWaitSec = 120,
   [switch] $ListOnly
 )
 
@@ -61,8 +65,11 @@ $FORMATS = @{
   'TIFF' = '{B96B3CB1-0728-11D3-9D7B-0000F81EF32E}'
 }
 
+$script:logClock = [System.Diagnostics.Stopwatch]::StartNew()
 function Write-Log([string] $msg) {
-  [Console]::Error.WriteLine('[wia] ' + $msg)
+  # Vaqt belgisi — WIA ulanish, sozlash va har bir Transfer qancha olishini
+  # ko'rish uchun (skaner tezligini baholashda kerak bo'ldi).
+  [Console]::Error.WriteLine(('[wia {0,6:N1}s] ' -f $script:logClock.Elapsed.TotalSeconds) + $msg)
 }
 
 function Emit-Json($obj) {
@@ -90,6 +97,111 @@ function Try-SetProp($propColl, [int] $id, $value, [string] $label) {
   } catch {
     Write-Log ("prop {0} ({1}) = {2} o'rnatilmadi: {3}" -f $label, $id, $value, $_.Exception.Message)
     return $false
+  }
+}
+
+# COM xatosidan HRESULT ni oladi. PowerShell uni ba'zan tashqi
+# `COMException` ga, ba'zan `MethodInvocationException` ning ichiga o'raydi.
+function Get-Hr($err) {
+  $hr = 0
+  if ($null -ne $err.Exception.InnerException) { $hr = $err.Exception.InnerException.HResult }
+  if ($hr -eq 0) { $hr = $err.Exception.HResult }
+  return ('0x{0:X8}' -f $hr)
+}
+
+# Skanerni ushlab turishi mumkin bo'lgan dasturlar. Xabarda nomma-nom
+# ko'rsatiladi: "qurilma band" o'z-o'zicha foydalanuvchiga hech nima
+# tushuntirmaydi, "Windows Skanerlash ochiq" esa bitta harakatga olib keladi.
+#
+# Qaytnoma va Qaytnoma AI bu ro'yxatda YO'Q: ikkalasi ham tray dasturi bo'lib
+# doim ishlab turadi, shunchaki ochiqligi qurilmani band qilmaydi. Ular
+# to'sqinlik qilishi mumkin bo'lgan yagona payt — ayni damda skanerlashi;
+# u alohida, aniqroq tekshiriladi (Test-SiblingScan).
+$SCANNER_APPS = [ordered]@{
+  'ScanApp'          = 'Windows Skanerlash'
+  'WFS'              = 'Windows Faks va skanerlash'
+  'wiaacmgr'         = 'Windows skanerlash ustasi'
+  'EEventManager'    = 'Epson Event Manager'
+  'Escndv'           = 'Epson Scan'
+  'epsonscan2'       = 'Epson Scan 2'
+  'EPSON Scan 2'     = 'Epson Scan 2'
+  'DocumentCapture'  = 'Epson Document Capture'
+  'CapturePro'       = 'Epson Document Capture Pro'
+}
+
+function Get-BlockingApps() {
+  $names = New-Object System.Collections.Generic.List[string]
+  foreach ($key in $SCANNER_APPS.Keys) {
+    if (Get-Process -Name $key -ErrorAction SilentlyContinue) {
+      $label = $SCANNER_APPS[$key]
+      if (-not $names.Contains($label)) { $names.Add($label) | Out-Null }
+    }
+  }
+  return $names.ToArray()
+}
+
+# Ikkinchi Qaytnoma ilovasi ham shu skriptni ishga tushirganmi? Ikkala ilova
+# bir vaqtda o'rnatilishi ko'zda tutilgan (natijalarni solishtirish uchun),
+# shuning uchun "boshqasi hozir skanerlamoqda" — kutilgan holat, xato emas.
+function Test-SiblingScan() {
+  try {
+    $others = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
+      Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*wia-scan.ps1*' })
+    return $others.Count -gt 0
+  } catch { return $false }
+}
+
+function Busy-Message([string] $action) {
+  $text = "Skaner band (WIA_ERROR_BUSY) - {0}." -f $action
+  if (Test-SiblingScan) {
+    return $text + " Ikkinchi Qaytnoma ilovasi ayni damda skanerlamoqda - u tugashini kuting."
+  }
+  $apps = Get-BlockingApps
+  if ($apps.Count -gt 0) {
+    return $text + " Ochiq turgan skaner dasturlari: " + ($apps -join ', ') + ". Ularni yoping va qayta urinib ko'ring."
+  }
+  return $text + " Boshqa dastur ko'rinmayapti - oldingi skanerlash uzilib qolgan bo'lsa, drayver qurilmani yana ~1-2 daqiqa band deb ko'rsatadi."
+}
+
+<#
+.SYNOPSIS
+  WIA amalini bajaradi; qurilma band bo'lsa byudjet tugaguncha qayta uradi.
+
+.DESCRIPTION
+  NEGA KERAK: 0x80210006 (WIA_ERROR_BUSY) qurilma haqiqatan ishlayotganini
+  BILDIRMAYDI. Uzilgan seansdan keyin (jarayon o'ldirilgan, ilova yopilgan,
+  boshqa skaner dasturi ochilib-yopilgan) drayver bo'sh turgan qurilmani ham
+  band deb ko'rsatadi. O'lchangan: DS-530II shu holatda 82 soniya "busy"
+  qaytardi va keyin hech qanday aralashuvsiz o'zi bo'shadi. Bitta urinishda
+  taslim bo'lish foydalanuvchiga "The device is busy" degan inglizcha drayver
+  xabarini ko'rsatadi va butun skanerlashni bekor qiladi - holbuki bir daqiqa
+  kutish yetardi.
+
+  Band bo'lish - Transfer BOSHLANMAGANI demak, shuning uchun qayta urinish
+  qog'ozni ikki marta tortib olmaydi.
+#>
+$script:busyExhausted = $false
+function Invoke-WiaBusy([scriptblock] $action, [string] $label) {
+  $deadline = (Get-Date).AddSeconds($BusyWaitSec)
+  $delay = 3
+  for ($attempt = 1; ; $attempt++) {
+    try {
+      return & $action
+    } catch {
+      if ((Get-Hr $_) -ne '0x80210006') { throw }
+      if ((Get-Date) -ge $deadline) {
+        # Bayroq: pastdagi `catch` lar buni oddiy Transfer xatosi deb
+        # o'ramasin, xabar va `DEVICE_BUSY` kodi shundayligicha yetib borsin.
+        $script:busyExhausted = $true
+        throw (Busy-Message $label)
+      }
+      Write-Log ("{0}: qurilma band, {1} s dan keyin qayta ({2}-urinish)" -f $label, $delay, $attempt)
+      # Tray ikonkasi nima kutayotganini ko'rsatsin - aks holda dastur
+      # bir daqiqaga sababsiz "bajarilmoqda" holatida qotib turadi.
+      Emit-Json @{ event = 'status'; message = ("Skaner band - kutilmoqda ({0}-urinish)" -f $attempt) }
+      Start-Sleep -Seconds $delay
+      if ($delay -lt 10) { $delay += 2 }
+    }
   }
 }
 
@@ -129,7 +241,7 @@ try {
   $deviceName = [string](Get-PropValue $target.Properties 7)
   Write-Log ('qurilma: ' + $deviceName)
 
-  $dev = $target.Connect()
+  $dev = Invoke-WiaBusy { $target.Connect() } 'ulanish'
 
   # --- ADF ni tanlash ---
   $caps = Get-PropValue $dev.Properties 3086
@@ -138,11 +250,27 @@ try {
   # Pages = 1 -> har Transfer bitta sahifa qaytaradi (ADF loop shu bilan boshqariladi)
   Try-SetProp $dev.Properties $WIA_DPS_PAGES 1 'PAGES' | Out-Null
 
+  # ADF sensori holati.
+  #
+  # NEGA BU YERDA DARHOL TO'XTAMAYMIZ: DS-530II drayveri qog'oz solingandan
+  # keyin FEED_READY bitini darhol yangilamaydi. Foydalanuvchi qog'ozni qayta
+  # solib Skanerlash bosganda skript "ADF bosh" deb chiqib ketardi, holbuki
+  # qog'oz joyida edi. Shuning uchun status bir necha marta qayta o'qiladi,
+  # keyin esa BARIBIR Transfer ga urinib ko'riladi — qog'oz haqiqatan yo'q
+  # bo'lsa drayver WIA_ERROR_PAPER_EMPTY (0x80210003) qaytaradi va biz uni
+  # loop oxirida aniq aniqlaymiz. Sensor holatiga ishonishdan ko'ra bu
+  # ishonchliroq: noto'g'ri "qog'oz yo'q" xabari — foydalanuvchi uchun
+  # tushunarsiz nosozlik, ortiqcha Transfer urinishi esa bepul.
   $status = Get-PropValue $dev.Properties $WIA_DPS_DOCUMENT_HANDLING_STATUS
   Write-Log ('handling status = ' + $status)
+  for ($try = 1; $try -le 3; $try++) {
+    if ($null -eq $status -or (($status -band $FEED_READY) -ne 0)) { break }
+    Start-Sleep -Milliseconds 400
+    $status = Get-PropValue $dev.Properties $WIA_DPS_DOCUMENT_HANDLING_STATUS
+    Write-Log ('handling status (qayta {0}) = {1}' -f $try, $status)
+  }
   if ($null -ne $status -and (($status -band $FEED_READY) -eq 0)) {
-    Emit-Json @{ ok = $false; code = 'NO_PAPER'; error = 'ADF bosh - qogoz soling'; pages = @(); device = $deviceName }
-    exit 3
+    Write-Log 'FEED_READY yoq - baribir Transfer ga urinamiz'
   }
 
   $item = $dev.Items.Item(1)
@@ -185,17 +313,17 @@ try {
 
     $img = $null
     try {
-      $img = $item.Transfer($fmtGuid)
+      # Band bo'lish shu yerda ham uchraydi: boshqa dastur to'plam o'rtasida
+      # qurilmaga yopishsa. Invoke-WiaBusy uni kutadi, qolgan xatolar o'tadi.
+      $img = Invoke-WiaBusy { $item.Transfer($fmtGuid) } ("sahifa {0}" -f $i)
     } catch {
-      $hr = 0
-      if ($null -ne $_.Exception.InnerException) { $hr = $_.Exception.InnerException.HResult }
-      if ($hr -eq 0) { $hr = $_.Exception.HResult }
-      $hex = ('0x{0:X8}' -f $hr)
+      $hex = Get-Hr $_
       # 0x80210003 = WIA_ERROR_PAPER_EMPTY -> normal tugash
       if ($hex -eq '0x80210003') {
         Write-Log ("PAPER_EMPTY - tugadi ({0} sahifa)" -f ($i - 1))
         break
       }
+      if ($hex -eq '0x80210006' -or $script:busyExhausted) { throw }
       throw ("Transfer xatosi (sahifa {0}, HRESULT={1}): {2}" -f $i, $hex, $_.Exception.Message)
     }
 
@@ -205,12 +333,26 @@ try {
     $pages.Add($path) | Out-Null
     Write-Log ('sahifa {0}: {1}x{2} -> {3} ({4:N1} MB)' -f $i, $img.Width, $img.Height, (Split-Path $path -Leaf), ((Get-Item $path).Length / 1MB))
 
+    # Sahifa tayyor bo'lishi bilan Node'ga xabar beramiz — u qayta ishlashni
+    # skaner keyingi varaqni o'qiyotgan paytda boshlaydi. Yakuniy JSON dan
+    # farqi: `event` maydoni bor va `ok` yo'q.
+    Emit-Json @{ event = 'page'; index = ($i - 1); path = $path }
+
     [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($img)
     $img = $null
     [System.GC]::Collect()
   }
 
   $sw.Stop()
+
+  # Birorta sahifa olinmadi — demak ADF haqiqatan bo'sh edi. Bu yagona
+  # ishonchli tekshiruv: yuqoridagi sensor holati eskirgan bo'lishi mumkin,
+  # Transfer ning javobi esa yo'q.
+  if ($pages.Count -eq 0) {
+    Emit-Json @{ ok = $false; code = 'NO_PAPER'; error = 'ADF bosh - qogoz soling'; pages = @(); device = $deviceName }
+    exit 3
+  }
+
   Emit-Json @{
     ok        = $true
     device    = $deviceName
@@ -226,12 +368,37 @@ try {
 
 } catch {
   $sw.Stop()
+  $busy = $script:busyExhausted -or ((Get-Hr $_) -eq '0x80210006')
+  $code = 'SCAN_FAILED'
+  $text = $_.Exception.Message
+  if ($busy) {
+    $code = 'DEVICE_BUSY'
+    if (-not $script:busyExhausted) { $text = Busy-Message 'ulanish' }
+  }
   Emit-Json @{
     ok        = $false
-    code      = 'SCAN_FAILED'
-    error     = $_.Exception.Message
+    code      = $code
+    error     = $text
     pages     = $pages.ToArray()
     elapsedMs = $sw.ElapsedMilliseconds
   }
+  if ($busy) { exit 4 }
   exit 1
+
+} finally {
+  # COM obyektlarini QO'LDA bo'shatamiz.
+  #
+  # NEGA: WIA seansi ochiq qolsa, drayver bo'sh turgan qurilmani ham keyingi
+  # ulanishlarga "busy" deb ko'rsatadi (o'lchangan: 82 s). Jarayon tugashida
+  # RCW lar yig'ilishiga ishonish yetarli emas - PowerShell chiqishda GC ni
+  # kafolatlamaydi, va aynan tez ketma-ket ikkinchi skanerlash shundan
+  # yiqilardi.
+  foreach ($com in @($item, $dev, $dm)) {
+    if ($null -ne $com) {
+      try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($com) } catch {}
+    }
+  }
+  $item = $null; $dev = $null; $dm = $null
+  [System.GC]::Collect()
+  [System.GC]::WaitForPendingFinalizers()
 }

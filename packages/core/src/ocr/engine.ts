@@ -15,13 +15,18 @@
  *    o'qib, segmentlarni birlashtiramiz → 47.2%.
  *
  *    47% yetarli emas, shuning uchun SKU ning ASOSIY manbai — `ШК → СКУ`
- *    lug'ati (`SkuDictionary`): shtrix-kod 100% ishonchli dekodlanadi, demak
- *    bir marta tasdiqlangan SKU keyin har doim to'g'ri bo'ladi. OCR faqat
- *    lug'atda yo'q mahsulotlar uchun taklif sifatida ishlatiladi va bunday
- *    qatorlar `needs_review` ga tushadi.
+ *    katalogi: shtrix-kod 100% ishonchli dekodlanadi. OCR faqat katalogda
+ *    yo'q mahsulotlar uchun ishlatiladi va bunday qatorlar `needs_review` ga
+ *    tushadi.
  *
  *  - `tessdata_best` SINALDI VA ISHLAMADI: tesseract.js ning WASM yadrosida
  *    `DotProductSSE` yo'q, "best" modellar ishga tushmay abort qiladi.
+ *
+ * WORKER POOL: har rejim uchun bir nechta worker. Tesseract WASM bitta
+ * worker ichida ketma-ket ishlaydi; 12 yadroli mashinada 13 qatorli sahifani
+ * bitta worker bilan o'qish ~2.4 s edi. Pool o'lchami rejimga qarab: `digits`
+ * eng ko'p chaqiriladi (har qator uchun 3 variant), `headerBlock` sahifasiga
+ * 4 marta, `latin`/`cyrillic` esa katalog tufayli deyarli chaqirilmaydi.
  *
  * Til fayllari lokal `langPath` dan o'qiladi — dastur offline ishlashi kerak.
  */
@@ -36,17 +41,23 @@ interface WorkerSpec {
   langs: string;
   psm: PSM;
   whitelist: string;
+  /** Standart pool o'lchami. */
+  pool: number;
 }
 
 const SPECS = {
-  digits: { langs: 'eng', psm: PSM.SINGLE_WORD, whitelist: '0123456789' },
-  date: { langs: 'eng', psm: PSM.SINGLE_LINE, whitelist: '0123456789-: ' },
+  digits: { langs: 'eng', psm: PSM.SINGLE_WORD, whitelist: '0123456789', pool: 3 },
+  // PSM 7 — `Итого` uchun ikkinchi fikr. O'lchov: PSM 8 toza `11` ni `1` deb
+  // o'qidi (takrorlangan ingichka glif), PSM 7 esa `11` — ikkalasi birgalikda
+  // o'qilib, qatorlar yig'indisiga mos nomzod tanlanadi.
+  digitsLine: { langs: 'eng', psm: PSM.SINGLE_LINE, whitelist: '0123456789', pool: 1 },
+  date: { langs: 'eng', psm: PSM.SINGLE_LINE, whitelist: '0123456789-: ', pool: 1 },
   // Sarlavha hududi ko'p qatorli. O'lchov: PSM 3 (AUTO) 4 sahifadan 3 tasida
   // sana va ID ni to'g'ri berdi; PSM 11 (SPARSE_TEXT) raqamlarni bo'lak-bo'lak
   // qilib yubordi ("3-0519:3"), PSM 6 esa bitta sahifada umuman bo'sh qaytardi.
-  headerBlock: { langs: 'eng', psm: PSM.AUTO, whitelist: '0123456789-: ' },
-  latin: { langs: 'eng', psm: PSM.SINGLE_BLOCK, whitelist: LATIN_CHARS },
-  cyrillic: { langs: 'rus', psm: PSM.SINGLE_BLOCK, whitelist: CYRILLIC_CHARS },
+  headerBlock: { langs: 'eng', psm: PSM.AUTO, whitelist: '0123456789-: ', pool: 2 },
+  latin: { langs: 'eng', psm: PSM.SINGLE_BLOCK, whitelist: LATIN_CHARS, pool: 1 },
+  cyrillic: { langs: 'rus', psm: PSM.SINGLE_BLOCK, whitelist: CYRILLIC_CHARS, pool: 1 },
 } as const satisfies Record<string, WorkerSpec>;
 
 export type OcrMode = keyof typeof SPECS;
@@ -62,67 +73,106 @@ export interface OcrOptions {
   langPath: string;
   /** Yuklab olingan tillar keshi (ko'rsatilmasa `langPath`). */
   cachePath?: string;
+  /** Rejim bo'yicha pool o'lchamini almashtirish. */
+  poolSizes?: Partial<Record<OcrMode, number>>;
+}
+
+/** Bitta worker va uning navbati. */
+interface Slot {
+  worker: Promise<Worker>;
+  /** Navbatda turgan ishlar soni — eng bo'sh worker'ni tanlash uchun. */
+  queued: number;
+  /** Bitta worker bir vaqtda bitta ish bajaradi — zanjir shuni ta'minlaydi. */
+  chain: Promise<unknown>;
 }
 
 export class OcrEngine {
-  readonly #workers = new Map<OcrMode, Worker>();
-  readonly #pending = new Map<OcrMode, Promise<Worker>>();
+  readonly #slots = new Map<OcrMode, Slot[]>();
   readonly #opts: OcrOptions;
+  #closed = false;
 
   constructor(opts: OcrOptions) {
     this.#opts = opts;
   }
 
-  async #worker(mode: OcrMode): Promise<Worker> {
-    const ready = this.#workers.get(mode);
-    if (ready) return ready;
+  /**
+   * Worker'larni oldindan yuklaydi.
+   *
+   * Til faylini yuklash rejimiga ~0.6 s oladi; tray ilovada bu ishga
+   * tushirishda fonda bajariladi, shunda birinchi skanerlash kutmaydi.
+   */
+  async warmUp(modes: readonly OcrMode[] = ['digits', 'headerBlock']): Promise<void> {
+    await Promise.all(modes.map((mode) => Promise.all(this.#pool(mode).map((s) => s.worker))));
+  }
 
-    // Bir vaqtda bir necha chaqiruv kelsa, worker faqat bir marta yaratilsin.
-    const inflight = this.#pending.get(mode);
-    if (inflight) return inflight;
+  #pool(mode: OcrMode): Slot[] {
+    const existing = this.#slots.get(mode);
+    if (existing) return existing;
 
     const spec: WorkerSpec = SPECS[mode];
-    const creating = (async () => {
-      const worker = await createWorker(spec.langs, 1, {
-        langPath: this.#opts.langPath,
-        cachePath: this.#opts.cachePath ?? this.#opts.langPath,
-        gzip: true,
-        logger: () => {},
-        errorHandler: () => {},
-      });
-      await worker.setParameters({
-        tessedit_pageseg_mode: spec.psm,
-        tessedit_char_whitelist: spec.whitelist,
-      });
-      this.#workers.set(mode, worker);
-      this.#pending.delete(mode);
-      return worker;
-    })();
+    const size = Math.max(1, this.#opts.poolSizes?.[mode] ?? spec.pool);
+    const slots: Slot[] = [];
+    for (let i = 0; i < size; i++) {
+      slots.push({ worker: this.#spawn(spec), queued: 0, chain: Promise.resolve() });
+    }
+    this.#slots.set(mode, slots);
+    return slots;
+  }
 
-    this.#pending.set(mode, creating);
-    return creating;
+  async #spawn(spec: WorkerSpec): Promise<Worker> {
+    const worker = await createWorker(spec.langs, 1, {
+      langPath: this.#opts.langPath,
+      cachePath: this.#opts.cachePath ?? this.#opts.langPath,
+      gzip: true,
+      logger: () => {},
+      errorHandler: () => {},
+    });
+    await worker.setParameters({
+      tessedit_pageseg_mode: spec.psm,
+      tessedit_char_whitelist: spec.whitelist,
+    });
+    return worker;
+  }
+
+  /** Eng bo'sh worker'ni tanlab, ishni uning navbatiga qo'yadi. */
+  #run<T>(mode: OcrMode, job: (worker: Worker) => Promise<T>): Promise<T> {
+    if (this.#closed) return Promise.reject(new Error('OcrEngine yopilgan'));
+
+    const slots = this.#pool(mode);
+    let slot = slots[0]!;
+    for (const s of slots) if (s.queued < slot.queued) slot = s;
+
+    slot.queued++;
+    const result = slot.chain
+      .catch(() => {})
+      .then(() => slot.worker)
+      .then(job)
+      .finally(() => {
+        slot.queued--;
+      });
+    slot.chain = result;
+    return result;
   }
 
   /** PNG buferdan matn o'qiydi. */
-  async read(png: Buffer, mode: OcrMode): Promise<OcrResult> {
-    const worker = await this.#worker(mode);
-    const { data } = await worker.recognize(png);
-    return { text: data.text.trim(), confidence: data.confidence };
+  read(png: Buffer, mode: OcrMode): Promise<OcrResult> {
+    return this.#run(mode, async (worker) => {
+      const { data } = await worker.recognize(png);
+      return { text: data.text.trim(), confidence: data.confidence };
+    });
   }
 
   /**
-   * Bir nechta tayyorlangan variantni o'qib, eng ko'p uchragan natijani
-   * qaytaradi. Yakka raqamlarda (`Кол-во`) 94.4% → 97.2% ga ko'taradi.
+   * Bir nechta tayyorlangan variantni PARALLEL o'qib, eng ko'p uchragan
+   * natijani qaytaradi. Yakka raqamlarda (`Кол-во`) 94.4% → 97.2%.
    */
   async readVoted(
     variants: readonly (Buffer | null)[],
     mode: OcrMode,
   ): Promise<{ text: string | null; confidence: number; agreement: number }> {
-    const reads: OcrResult[] = [];
-    for (const png of variants) {
-      if (!png) continue;
-      reads.push(await this.read(png, mode));
-    }
+    const reads = await Promise.all(
+      variants.filter((v): v is Buffer => v !== null).map((png) => this.read(png, mode)),
+    );
     if (reads.length === 0) return { text: null, confidence: 0, agreement: 0 };
 
     const tally = new Map<string, { count: number; confidence: number }>();
@@ -153,9 +203,9 @@ export class OcrEngine {
   }
 
   async close(): Promise<void> {
-    const workers = [...this.#workers.values()];
-    this.#workers.clear();
-    this.#pending.clear();
-    await Promise.all(workers.map((w) => w.terminate()));
+    this.#closed = true;
+    const slots = [...this.#slots.values()].flat();
+    this.#slots.clear();
+    await Promise.all(slots.map((s) => s.worker.then((w) => w.terminate()).catch(() => {})));
   }
 }

@@ -54,7 +54,9 @@ export type IssueCode =
   | 'TOTAL_QTY_MISMATCH'
   | 'TOTALS_MISSING'
   | 'DUPLICATE_DOC'
-  | 'COLUMN_DETECTION_FALLBACK';
+  | 'DUPLICATE_ROW'
+  | 'COLUMN_DETECTION_FALLBACK'
+  | 'VLM_SOURCED';
 
 export type IssueSeverity = 'error' | 'warn';
 
@@ -81,9 +83,24 @@ export interface LineItem {
   quantity: number | null;
   /** OCR xom natijasi — diagnostika uchun (`3 5` kabi shovqinni ko'rish). */
   quantityRaw: string | null;
+  /**
+   * Qiymat qayerdan olindi.
+   *
+   * `vlm` — deterministik yo'l muvaffaqiyatsiz bo'lgani uchun til modeli
+   * o'qigan. Bunday qiymat jadvalga yoziladi, ammo har doim `⚠` bilan
+   * belgilanadi (`VLM_SOURCED`): model taxmin qilishi mumkin, dekoder esa
+   * yo'q. `undefined` — model umuman ishlatilmagan.
+   */
+  quantitySource?: 'ocr' | 'vlm';
+  skuSource?: 'ocr' | 'vlm';
   /** Qator qaysi sahifada topilgani (to'plamdagi indeks). */
   pageIndex: number;
   issues: Issue[];
+  /**
+   * `Ид документа + ШК` juftligi allaqachon yozilgan — qator Sheets'ga
+   * yozilmaydi, faqat `_log` da qayd etiladi (`pipeline/dedupe.ts`).
+   */
+  duplicate?: boolean;
 }
 
 /** `Итого` qatoridan olingan jami qiymatlar. */

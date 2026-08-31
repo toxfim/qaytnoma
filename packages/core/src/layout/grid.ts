@@ -146,11 +146,21 @@ export function detectItemTable(
   // Mezon JADVALNING O'Z chiziqlariga nisbatan olinadi — sahifadagi barcha
   // chiziqlarning medianasi sarlavha bloklari tufayli chalg'ituvchi bo'ladi.
   const tableEdges = [chosen[0]!.top, ...chosen.map((b) => b.bottom)];
-  const rowEdges = repairMissedLines(
-    tableEdges,
-    profile,
-    median(tableEdges.map((y) => profile[y] ?? 0)),
-  );
+  const medianFrac = median(tableEdges.map((y) => profile[y] ?? 0));
+
+  // Avval jadval OXIRINI cho'zamiz, keyin ichki yo'qolgan chiziqlarni
+  // tiklaymiz — kengaytirish baland band qo'shishi mumkin va uni ham
+  // `repairMissedLines` bo'lishi kerak.
+  const extended = extendTableDown(tableEdges, profile, bin, width, height, columnEdges, {
+    medianFrac,
+    minVLineFill,
+    artifacts,
+    artifactTolerance,
+    margin,
+    tolerance,
+    minColumnEdges,
+  });
+  const rowEdges = repairMissedLines(extended, profile, medianFrac);
   const left = columnEdges[0]!;
   const right = columnEdges[columnEdges.length - 1]!;
 
@@ -226,6 +236,94 @@ export function findFullHeightColumns(
     if (covered / segments >= minCoverage) hits.push(x);
   }
   return hits;
+}
+
+/**
+ * Jadvalning PASTKI chegarasini so'lg'in chiziq ortidan cho'zadi.
+ *
+ * NEGA KERAK: `repairMissedLines` faqat mavjud bandlar ICHIDAGI chiziqni
+ * tiklaydi. Agar yo'qolgan chiziq jadvalning eng oxirgisi bo'lsa, uning
+ * ostidagi qator umuman band hosil qilmaydi va sahifaning oxirgi qatori jimgina
+ * yo'qoladi — hech qanday xatosiz.
+ *
+ * O'lchangan holat (15-0006740693, 1-sahifa): №13 qatorining pastki chizig'i
+ * uzuq-yuluq bosilgan, proyeksiya ulushi atigi 0.317 (oston 0.45), shuning
+ * uchun to'r y=2991 da to'xtagan. Natija: hujjatda 38 qator, sheetga 37 tasi
+ * tushgan; `Итого` 132 o'rniga 100 chiqqan.
+ *
+ * HIMOYA — ostonani pasaytirish emas, VERTIKAL TUZILISH: qabul qilingan band
+ * ichida jadvalning o'z ustun chegaralari topilishi shart. Bu `Итого` bandini
+ * ham, imzo blokini ham avtomatik rad etadi, chunki ularda `Итого:` yozuvi
+ * ustunlarni birlashtiradi va chegaralar soni yetmaydi.
+ */
+function extendTableDown(
+  rowEdges: number[],
+  profile: Float32Array,
+  bin: Uint8Array,
+  width: number,
+  height: number,
+  columnEdges: number[],
+  opts: {
+    medianFrac: number;
+    minVLineFill: number;
+    artifacts: number[];
+    artifactTolerance: number;
+    margin: number;
+    tolerance: number;
+    minColumnEdges: number;
+  },
+): number[] {
+  if (rowEdges.length < 3) return rowEdges;
+
+  const heights: number[] = [];
+  for (let i = 0; i < rowEdges.length - 1; i++) heights.push(rowEdges[i + 1]! - rowEdges[i]!);
+  const medianHeight = median(heights);
+  if (medianHeight < 8) return rowEdges;
+
+  // Cho'qqi ostonasi `repairMissedLines` bilan bir xil — bu yerda ham asosiy
+  // himoya oston emas, quyidagi tuzilish sharti.
+  const minPeak = opts.medianFrac * 0.5;
+  // Yuqori chegara ikki barobar qator balandligini qamraydi: shablonda tavsif
+  // ikki qatorga sig'masa qator ~2x baland bo'ladi. Bunday band keyin
+  // `repairMissedLines` tomonidan bo'linadi.
+  const lowBound = Math.round(medianHeight * 0.7);
+  const highBound = Math.round(medianHeight * 2.4);
+
+  // Ko'pi bilan shuncha qator qo'shiladi — cheksiz cho'zilib ketmasligi uchun.
+  const maxAdded = 4;
+  const out = [...rowEdges];
+
+  for (let added = 0; added < maxAdded; added++) {
+    const last = out[out.length - 1]!;
+    const from = last + lowBound;
+    const to = Math.min(height - 1, last + highBound);
+    if (from >= to) break;
+
+    let best: number | null = null;
+    let bestFrac = minPeak;
+    for (let y = from; y <= to; y++) {
+      const v = profile[y]!;
+      if (v < bestFrac) continue;
+      if (v < (profile[y - 1] ?? 0) || v < (profile[y + 1] ?? 0)) continue;
+      bestFrac = v;
+      best = y;
+    }
+    if (best === null) break;
+
+    // Tuzilish sharti: band jadvalning o'z ustunlariga ega bo'lishi kerak.
+    const vlines = findVerticalLines(bin, width, last, best, opts.minVLineFill).filter(
+      (x) =>
+        x >= opts.margin &&
+        x <= width - opts.margin &&
+        !opts.artifacts.some((a) => Math.abs(a - x) <= opts.artifactTolerance),
+    );
+    if (vlines.length < opts.minColumnEdges) break;
+    if (similarity(columnEdges, vlines, opts.tolerance) < 0.75) break;
+
+    out.push(best);
+  }
+
+  return out;
 }
 
 /**

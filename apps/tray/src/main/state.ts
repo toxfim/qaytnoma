@@ -13,6 +13,8 @@ export interface LastRun {
   documents: number;
   rows: number;
   flagged: number;
+  /** `Ид + ШК` allaqachon bor bo'lgani uchun o'tkazib yuborilgan qatorlar. */
+  skipped: number;
   /** Xato bo'lsa qisqacha izoh. */
   error: string | null;
 }

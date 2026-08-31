@@ -80,6 +80,10 @@ export function groupIntoDocuments(
         pageIndex: page.pageIndex,
         issues: [],
       };
+      // Manba belgisi validatsiyaga o'tadi: model o'qigan qiymat
+      // tekshiruvga belgilanadi.
+      if (row.quantitySource) item.quantitySource = row.quantitySource;
+      if (row.skuSource) item.skuSource = row.skuSource;
       current!.items.push(item);
     }
   }

@@ -184,11 +184,142 @@ Ikkita tizim darajasidagi tuzatish ham shu skandan kelib chiqdi:
   (`5850`) soxta hujjat raqami va soxta `15-0000005850` ID si yasalgan edi.
   Endi sana yoki dekodlangan shtrix-kod ham talab qilinadi.
 
-## Tezlik
+## Tezlik — v2
 
-| Bosqich | Vaqt |
+### DPI: 600 → 300
+
+600 DPI skanlar 300 va 400 ga tushirilib, ikkala to'plamda (toza va qiyshiq)
+qayta o'lchandi. **Aniqlik zarracha o'zgarmadi**: 36/36 qator, 36/36 miqdor,
+36/36 shtrix-kod, 3/3 hujjat maydoni — 600 dagi bilan bir xil. Sabab: to'r
+baribir 2481 px kenglikda (300 DPI) ishlaydi, OCR kesmalari esa standart
+balandlikka keltiriladi — 600 DPI dagi qo'shimcha piksellar hech qayerda
+ishlatilmas edi.
+
+### O'lchov: 2 varoq (13 + 13 qator), baseline vs v2
+
+| Bosqich (sahifasiga) | 600 DPI baseline | 300 DPI, kod o'zgarmagan | 300 DPI + v2 kod |
+|---|---|---|---|
+| Skanerlash | 12.8 s | — | 6.5–9.6 s |
+| Sarlavha OCR (4 oston) | 4962 ms ketma-ket | 2402 ms | parallel, 2 worker |
+| SKU OCR (13 qator) | 3515 ms | 4679 ms | **0 — katalogda bor, o'qilmaydi** |
+| Sarlavha shtrix-kod | 2355 ms | 685 ms | tor kesma |
+| Qator miqdor OCR | 2170 ms ketma-ket | 2448 ms | 4 qator parallel, 3 worker |
+| Qator shtrix-kod | 1955 ms | 1048 ms | |
+| preparePage | 1010 ms | 642 ms | |
+| Arxiv JPEG | 920 ms (mozjpeg) | 849 ms | asosiy yo'ldan tashqarida, mozjpeg'siz |
+| **Qayta ishlash jami** | **17.5 s** | **8.9 s** | **2.1–3.1 s** |
+
+### Uchdan-uchgacha, haqiqiy skaner
+
+| | v1 (600 DPI, ketma-ket) | v2 (300 DPI, oqim) |
+|---|---|---|
+| 1 varoq, 1 qator, Sheets'siz | ~30 s | **11.8 s** |
+| 1 varoq, 9 qator, Sheets bilan | ~32 s | **12.7 s** |
+
+v2 da skanerlash va qayta ishlash BIR VAQTDA ketadi: `wia-scan.ps1` har sahifani
+saqlagach stdout ga hodisa yozadi, Node shu zahoti o'sha sahifani qayta
+ishlaydi — skaner keyingi varaqni o'qiyotgan paytda. Ko'p varoqli to'plamda
+umumiy vaqt "skan + qayta ishlash" emas, skanerlash vaqtiga yaqinlashadi.
+
+Qolgan vaqtning asosiy qismi skanerning o'zi (6.5–9.6 s/varoq) — bu apparat
+chegarasi.
+
+### `Итого` — v2 da topilgan va tuzatilgan
+
+Tezlik ishida `Итого` katagining ikkita muammosi ochildi (ikkalasi v1 da ham
+bor edi, shunchaki ko'rinmagan):
+
+| Muammo | Belgisi | Yechim |
+|---|---|---|
+| Qatorning pastki chizig'i so'lg'in bo'lib topilmadi, keyingi chiziq (imzo bloki, +279 px) olindi | Kesma `166` ning ostiga tushdi, `100` o'qildi | Qator balandligi shablondan olinadi (0.021 x sahifa balandligi ≈ 73 px); topilgan chiziq faqat shu chegara ichida bo'lsa ishlatiladi |
+| PSM 8 toza `11` ni `1` deb o'qidi (takrorlangan ingichka glif) | Σ=11 ≠ Итого=1 → 9 qator bekorga belgilandi | PSM 7 da ham o'qiladi (u `11` beradi); nomzodlar orasidan qatorlar yig'indisiga mos keluvchi tanlanadi |
+
+Ikkinchi yechimning asosi: qatorlar mustaqil o'qilgan, ularning yig'indisi
+bilan tasodifan ustma-ust tushgan OCR xatosi ehtimoli juda kichik. Hech bir
+nomzod mos kelmasa, nomuvofiqlik avvalgidek xato sifatida ko'rsatiladi.
+
+Natija: 8 sahifaning hammasida `Итого` to'g'ri (v1 da 3 tasida null/xato). Dasturiy tomondan yana yutuq beradigan joylar: Sheets API so'rovlari
+(sarlavha tekshiruvi endi bir marta bajariladi), OCR worker'lari (tray ilovada
+skanerlashlar orasida isitilgan holda saqlanadi).
+
+## 2026-08-28 — `15-0006740693` (38 qator, 3 sahifa)
+
+Foydalanuvchi bildirgan holat: hujjatda 38 qator, sheetga 37 tasi tushgan;
+qayta skanerlashda esa "Skanerda qog'oz topilmadi" chiqqan. Arxiv PDF dagi
+sahifalar bo'yicha qayta o'lchandi.
+
+### Boshlang'ich holat
+
+| | qiymat |
 |---|---|
-| Skanerlash (600 DPI, rangli) | ~13 s / sahifa |
-| Sahifani tayyorlash (deskew + binarizatsiya) | ~1.1 s |
-| To'liq quvur | ~10 s / sahifa (13 qatorli sahifada) |
-| 4 sahifa, 3 hujjat, uchdan boshiga | 39 s |
+| Qatorlar | 37 / 38 |
+| `Кол-во` o'qilgan | 31 / 37 (6 ta null) |
+| `Итого` | 132 (to'g'ri), Σ = 100 |
+| Belgilangan qatorlar | 41 |
+
+### Ikkita mustaqil sabab
+
+**1. Jadvalning eng oxirgi qatori yo'qoladi — hech qanday xatosiz.**
+
+1-sahifada №13 qatorining pastki chizig'i uzuq-yuluq bosilgan: proyeksiya
+ulushi **0.317**, `findHorizontalLines` ostonasi esa 0.45. To'r y=2991 da
+to'xtagan, №13 (`1000028126606`, miqdor 2) esa hech qanday band hosil
+qilmagan. `repairMissedLines` bu holatni ushlay olmaydi — u faqat MAVJUD
+bandlar ichidagi chiziqni tiklaydi, jadval oxiridan tashqarida emas.
+
+Yechim — `extendTableDown` (`layout/grid.ts`): jadval oxiridan pastda median
+qator balandligi masofasida pasaytirilgan oston bilan cho'qqi qidiriladi.
+Ostonani umumiy pasaytirmaslik uchun himoya VERTIKAL TUZILISHGA qo'yilgan —
+qabul qilingan bandda jadvalning o'z ustun chegaralari topilishi shart. Bu
+`Итого` bandini ham, imzo blokini ham avtomatik rad etadi, chunki ularda
+ustunlar birlashadi.
+
+**2. Toza raqam o'qilmaydi, chunki masshtablash jimgina o'chib qoladi.**
+
+Olti katakda raqam ko'z bilan toza ko'rinardi (`3`, `1`, `2`, `12`, `7`), OCR
+esa bo'sh qaytarardi. Sabab zanjiri: `removeBlueInk` dan keyin mayda kulrang
+qoldiq nuqtalar qoladi → `contentBox` 7x23 o'rniga 50x79 gacha cho'ziladi →
+`prepareForOcr` da `scale = targetHeight / h` birdan kichik bo'lib qoladi →
+raqam Tesseract'ga original ~25 px balandlikda boradi → bo'sh natija.
+
+Yechim — `denoiseSpecks` (`image/bbox.ts`): bog'langan komponentlar bo'yicha
+eng balandiga nisbatan 0.45 dan past bo'lganlari oqartiriladi. Faqat mazmuni
+bir xil balandlikdagi kataklarda yoqilgan (`Кол-во`, `Итого`); SKU/tavsifda
+`i` nuqtasi va apostrof qonuniy ravishda kichik, shuning uchun u yerda o'chiq.
+
+### Natija
+
+| | oldin | keyin |
+|---|---|---|
+| Qatorlar | 37 / 38 | **38 / 38** |
+| `Кол-во` | 31 / 37 | **38 / 38** |
+| Σ vs `Итого` | 100 ≠ 132 | **132 = 132** |
+| Belgilangan | 41 | **0** |
+
+### Regressiya: `Итого` va cho'zilgan nomzod
+
+`denoise` etalon skanning 3-sahifasida (`15-1006739165`) yangi xato keltirdi:
+katak tozalangach `Итого` **o'qiladigan** bo'ldi, ammo ikkala PSM ham toza
+`11` ni `1` deb o'qidi (Σ=11 → 9 qator bekorga belgilandi). Avvalgi yechim —
+"PSM 7 da ham o'qish" — bu rasmda yordam bermadi.
+
+O'lchov: masshtab hech narsani o'zgartirmaydi (targetHeight 80/120/160/200/260
+— hammasida `"1"`), gliflarni GORIZONTAL AJRATISH esa hal qiladi:
+
+| x-cho'zish | PSM 8 | PSM 7 |
+|---|---|---|
+| 1.0 | `"1"` (52) | `"1"` (61) |
+| **1.5** | **`"11"` (94)** | **`"11"` (79)** |
+| 2.0 | `"11"` (85) | `"11"` (43) |
+| 2.5 | `"11"` (72) | `"11"` (71) |
+| 3.0 | `""` (0) | `""` (0) |
+
+`prepareForOcr` ga `stretchX` qo'shildi va `readTotals` uchinchi o'qishni
+1.5x cho'zilgan nusxada bajaradi. Natija OVOZ BERISHGA qo'shilmaydi — faqat
+nomzodlar ro'yxatiga tushadi, shuning uchun `reconcileTotals` uni qatorlar
+yig'indisiga mos kelgandagina tanlaydi va boshqa hollarda hech narsa
+o'zgarmaydi.
+
+Etalon 4 sahifali skan (36 qator, 3 hujjat) shundan keyin: **36/36 qator,
+0 belgilangan, birorta ogohlantirishsiz** — oldin `15-1006739165` da
+"`Итого` qatoridagi miqdor o'qilmadi" bor edi.

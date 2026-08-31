@@ -7,6 +7,7 @@
  *   - Windows ishga tushganda avtomatik ochiladi.
  */
 import { app, dialog, Menu, nativeImage, shell, Tray, type MenuItemConstructorOptions } from 'electron';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -20,12 +21,59 @@ import { Store, type AppState, type Status } from './state.js';
 import { JobRunner } from './jobs.js';
 import { HotFolderWatcher } from './watcher.js';
 import { openSettingsWindow } from './settings-window.js';
+import { showErrorDialog } from './error-dialog.js';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
 const ASSETS = join(ROOT, 'assets');
 
-/** Ishga tushirishda oyna ko'rsatmaslik uchun bayroq (startup uchun). */
-const HIDDEN_FLAG = '--hidden';
+/**
+ * Avtomatik ishga tushirish holati.
+ *
+ * DIQQAT — Windows'da `getLoginItemSettings` yozuvni BUYRUQ QATORI bo'yicha
+ * solishtiradi: `setLoginItemSettings` ga `args` berilgan bo'lsa, o'qishda ham
+ * aynan shu `args` berilishi shart, aks holda doim `false` qaytadi. Ilgari
+ * `--hidden` bilan yozib, argumentsiz o'qilardi — natijada menyudagi belgi hech
+ * qachon chiqmasdi va o'chirib ham bo'lmasdi. Endi argument umuman
+ * ishlatilmaydi (dastur uni o'qimas ham edi), yozish va o'qish mos.
+ *
+ * Ishlab chiqish rejimida (`npx electron .`) yozuv `electron.exe` ga ishora
+ * qilib, login'da bo'sh Electron oynasini ochardi — shuning uchun faqat
+ * paketlangan dasturda ishlaydi.
+ */
+function isAutoLaunchEnabled(): boolean {
+  return app.isPackaged && app.getLoginItemSettings().openAtLogin;
+}
+
+/**
+ * Paketlangan ilovadagi Tesseract til fayllari papkasi.
+ *
+ * `extraResources` ularni `resources/tessdata` ga qo'yadi, konfiguratsiyaning
+ * standart qiymati esa `%APPDATA%/barcodeer/tessdata` — u papkani hech kim
+ * yaratmaydi va hech qachon to'ldirmaydi. Standart qiymatni almashtirmasak,
+ * o'rnatilgan ilovada OCR til faylini umuman topa olmaydi (ishlab chiqishda
+ * bu ko'rinmaydi: u yerda `loadConfig` repo ichidagi `.tessdata` ni topadi).
+ */
+function packagedTessdata(): string | null {
+  return app.isPackaged ? join(process.resourcesPath, 'tessdata') : null;
+}
+
+/**
+ * Til fayllari yo'qolgan bo'lsa paketdagi nusxaga qaytaradi.
+ *
+ * `config.json` standart qiymatdan ustun turadi, shuning uchun standartni
+ * to'g'rilash yetarli emas: eski o'rnatishlarda saqlanib qolgan noto'g'ri yo'l
+ * o'z-o'zidan tuzalmaydi. Yo'l mavjudligini tekshirib almashtiramiz va
+ * natijani saqlaymiz.
+ */
+async function repairTessdataPath(config: BarcodeerConfig): Promise<BarcodeerConfig> {
+  const packaged = packagedTessdata();
+  if (!packaged) return config;
+  if (existsSync(config.tessdataPath) || !existsSync(packaged)) return config;
+
+  const fixed = { ...config, tessdataPath: packaged };
+  await saveConfig(fixed).catch(() => {});
+  return fixed;
+}
 
 let tray: Tray | null = null;
 let store: Store;
@@ -48,7 +96,12 @@ async function main(): Promise<void> {
 
   let config: BarcodeerConfig;
   try {
-    config = await loadConfig({ devRoot: ROOT.includes('apps') ? repoRoot() : undefined });
+    const packaged = packagedTessdata();
+    config = await loadConfig({
+      devRoot: ROOT.includes('apps') ? repoRoot() : undefined,
+      defaults: packaged ? { tessdataPath: packaged } : undefined,
+    });
+    config = await repairTessdataPath(config);
   } catch (err) {
     dialog.showErrorBox(
       'Sozlamalar xatosi',
@@ -61,6 +114,8 @@ async function main(): Promise<void> {
 
   store = new Store(config);
   jobs = new JobRunner(store);
+  // OCR worker'larini fonda isitamiz — birinchi skanerlash 2.4 s tezroq boshlanadi.
+  if (isConfigured(config)) jobs.prewarm();
 
   tray = new Tray(iconFor('off'));
   tray.setToolTip('Qaytnoma');
@@ -115,7 +170,22 @@ function buildMenu(state: AppState): MenuItemConstructorOptions[] {
 
   if (lastRun) {
     items.push({ type: 'separator' });
-    items.push({ label: summarize(lastRun), enabled: false });
+    // Xato bo'lsa qator bosiladigan bo'ladi: menyudagi matn 60 belgida
+    // kesiladi, modal esa sababni to'liq ko'rsatadi va nusxalab beradi.
+    const error = lastRun.error;
+    items.push({
+      label: error ? `${summarize(lastRun)} — batafsil` : summarize(lastRun),
+      enabled: Boolean(error),
+      click: error
+        ? () =>
+            void showErrorDialog(
+              lastRun.documents > 0
+                ? 'Oxirgi skanerlashdagi ogohlantirish'
+                : 'Oxirgi ish bajarilmadi',
+              error,
+            )
+        : undefined,
+    });
   }
 
   items.push(
@@ -142,9 +212,10 @@ function buildMenu(state: AppState): MenuItemConstructorOptions[] {
       click: () => openSettingsWindow(store, onConfigSaved),
     },
     {
-      label: 'Ishga tushganda ochilsin',
+      label: app.isPackaged ? 'Ishga tushganda ochilsin' : 'Ishga tushganda ochilsin (faqat o`rnatilgan dasturda)',
       type: 'checkbox',
-      checked: app.getLoginItemSettings().openAtLogin,
+      enabled: app.isPackaged,
+      checked: isAutoLaunchEnabled(),
       click: (item) => setAutoLaunch(item.checked),
     },
     { type: 'separator' },
@@ -189,22 +260,32 @@ async function applyWatcher(config: BarcodeerConfig): Promise<void> {
   store.update({ watching: true });
 }
 
+/**
+ * Avtomatik ishga tushirishni ta'minlaydi — `goal.md` dasturning startup
+ * ilovalarida bo'lishini talab qiladi.
+ *
+ * Har ishga tushirishda tekshiriladi, bir marta emas: Windows yozuvi `.exe`
+ * ning aniq yo'liga bog'langan, dastur yangilanib boshqa papkaga tushsa
+ * (yoki eski yozuv ishlab chiqish nusxasiga ishora qilsa) u bekor bo'ladi va
+ * dastur o'zini qayta ro'yxatdan o'tkazadi. Faqat foydalanuvchi menyudan
+ * ochiq o'chirgan bo'lsa (`config.autoLaunchDisabled`) tegilmaydi.
+ */
 function applyAutoLaunch(config: BarcodeerConfig): void {
-  // Birinchi ishga tushirishda avtomatik ochilishni yoqamiz — `goal.md`
-  // dasturning startup ilovalarida bo'lishini talab qiladi.
-  if (!app.getLoginItemSettings().openAtLogin && config.enabled) setAutoLaunch(true);
+  if (!app.isPackaged || config.autoLaunchDisabled) return;
+  if (!app.getLoginItemSettings().openAtLogin) setAutoLaunch(true);
 }
 
+/** Menyudan yoqish/o'chirish — foydalanuvchi qarori sozlamada eslab qolinadi. */
 function setAutoLaunch(enabled: boolean): void {
-  app.setLoginItemSettings({
-    openAtLogin: enabled,
-    args: [HIDDEN_FLAG],
-  });
+  if (!app.isPackaged) return;
+  app.setLoginItemSettings({ openAtLogin: enabled });
+  void saveConfig(store.patchConfig({ autoLaunchDisabled: !enabled })).catch(() => {});
   render(store.state);
 }
 
 async function quit(): Promise<void> {
   if (watcher) await watcher.stop();
+  await jobs.dispose();
   tray?.destroy();
   app.quit();
 }
@@ -230,8 +311,9 @@ function summarize(run: NonNullable<AppState['lastRun']>): string {
     minute: '2-digit',
   });
   if (run.error && run.documents === 0) return `${time} — xato: ${truncate(run.error, 60)}`;
+  const skipped = run.skipped ? `, ${run.skipped} takror` : '';
   const flagged = run.flagged ? `, ${run.flagged} ⚠` : '';
-  return `${time} — ${run.documents} hujjat, ${run.rows} qator${flagged}`;
+  return `${time} — ${run.documents} hujjat, ${run.rows} qator${skipped}${flagged}`;
 }
 
 function truncate(text: string, max: number): string {

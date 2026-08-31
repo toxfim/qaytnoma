@@ -12,13 +12,15 @@
 import { mkdtemp, readdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { scanBatch, listScanners } from '@barcodeer/scanner';
+import { scanStream, listScanners } from '@barcodeer/scanner';
 import { loadConfig, loadServiceAccount, type BarcodeerConfig } from './config.js';
 import { SheetsWriter } from './output/sheets.js';
 import { runPipeline, type CatalogueOptions, type ProgressEvent } from './pipeline/run.js';
 import { rowNeedsReview } from './pipeline/validate.js';
 import { SkuCatalogue } from './store/sku-catalogue.js';
 import { fetchCatalogue } from './input/catalogue-sheet.js';
+import { vlmFromConfig } from './vlm/setup.js';
+import { fullImage, preparePage, WORK_WIDTH } from './layout/page.js';
 
 const IMAGE_RE = /\.(bmp|png|jpe?g|tiff?)$/i;
 
@@ -42,6 +44,9 @@ async function main(): Promise<void> {
     case 'sync-catalogue':
       await commandSyncCatalogue(config);
       return;
+    case 'gemini':
+      await commandGemini(config, positional[0]);
+      return;
     default:
       printHelp();
   }
@@ -53,11 +58,16 @@ function printHelp(): void {
   scan                  Skanerdan o'qib, hujjatlarni qayta ishlaydi
   ingest <papka|fayl>   Tayyor rasmlardan qayta ishlaydi
   sync-catalogue        Uzum katalogini (Баркод -> Скю) majburan yangilaydi
+  gemini <rasm>         Bitta sahifani faqat Gemini orqali o'qib ko'rsatadi
   check                 Sozlamalar, skaner va Sheets ulanishini tekshiradi
 
 Bayroqlar:
   --no-sheets           Google Sheets ga yozmaydi
-  --dpi <n>             Skanerlash ruxsati (standart: konfiguratsiyadan)`);
+  --dpi <n>             Skanerlash ruxsati (standart: konfiguratsiyadan)
+  --pages <n>           Ko'pi bilan n varoq skanerlaydi (sinov uchun)
+  --gemini              Til modeli zaxirasini yoqadi (assist rejimi)
+  --gemini-full         Har bir sahifani to'liq modelga ham beradi
+  --no-gemini           Sozlamada yoqilgan bo'lsa ham o'chiradi`);
 }
 
 async function commandCheck(config: BarcodeerConfig): Promise<void> {
@@ -69,6 +79,10 @@ async function commandCheck(config: BarcodeerConfig): Promise<void> {
   console.log(`  dataDir       : ${config.dataDir}`);
   console.log(`  scanDpi       : ${config.scanDpi}`);
   console.log(`  katalog       : ${config.catalogueSpreadsheetId ?? 'sozlanmagan'} / "${config.catalogueSheetName}"`);
+  console.log(
+    `  gemini        : ${config.geminiMode}` +
+      (config.geminiApiKey ? ` / ${config.geminiModel}` : ' (kalit yo`q)'),
+  );
 
   const catalogue = await SkuCatalogue.open(join(config.dataDir, 'sku-catalogue.json'));
   console.log(
@@ -134,19 +148,33 @@ async function commandSyncCatalogue(config: BarcodeerConfig): Promise<void> {
 async function commandScan(config: BarcodeerConfig, flags: Set<string>, rest: string[]): Promise<void> {
   const dpiIndex = rest.indexOf('--dpi');
   const dpi = dpiIndex >= 0 ? Number(rest[dpiIndex + 1]) : config.scanDpi;
+  const pagesIndex = rest.indexOf('--pages');
+  const maxPages = pagesIndex >= 0 ? Number(rest[pagesIndex + 1]) : undefined;
 
   const outDir = await mkdtemp(join(tmpdir(), 'barcodeer-scan-'));
   console.log(`Skanerlash boshlandi (${dpi} DPI)...`);
+  const started = Date.now();
 
-  const result = await scanBatch({ dpi, outDir, deviceName: config.scannerName });
+  // Oqim rejimi: sahifalar skanerdan kelishi bilan qayta ishlanadi.
+  const stream = scanStream({
+    dpi,
+    outDir,
+    deviceName: config.scannerName,
+    maxPages,
+    onStatus: (message) => console.log(message),
+  });
+  await process_(config, flags, stream.pages);
+
+  const result = await stream.result;
   if (!result.ok) {
     console.error(`Skanerlash xatosi [${result.code}]: ${result.error}`);
     process.exitCode = 1;
     return;
   }
-  console.log(`${result.pages.length} sahifa skanerlandi (${(result.elapsedMs / 1000).toFixed(1)} s)`);
-
-  await process_(config, flags, result.pages);
+  console.log(
+    `\nSkaner: ${result.pages.length} sahifa, ${(result.elapsedMs / 1000).toFixed(1)} s. ` +
+      `Uchdan-uchgacha (skan + qayta ishlash + yozish): ${((Date.now() - started) / 1000).toFixed(1)} s`,
+  );
 }
 
 async function commandIngest(
@@ -176,7 +204,7 @@ async function commandIngest(
 async function process_(
   config: BarcodeerConfig,
   flags: Set<string>,
-  pages: string[],
+  pages: Iterable<string> | AsyncIterable<string>,
 ): Promise<void> {
   let sheets: SheetsWriter | undefined;
   if (!flags.has('--no-sheets')) {
@@ -194,6 +222,7 @@ async function process_(
 
   const result = await runPipeline({
     pages,
+    vlm: vlmOptions(config, flags),
     tessdataPath: config.tessdataPath,
     dataDir: config.dataDir,
     invoicesRoot: config.invoicesRoot,
@@ -212,7 +241,7 @@ async function process_(
     if (doc.pdfPath) console.log(`  PDF: ${doc.pdfPath}`);
     for (const issue of doc.issues) console.log(`  [${issue.severity}] ${issue.message}`);
     for (const item of doc.items) {
-      const marks = item.issues.length ? ' ⚠' : '';
+      const marks = item.duplicate ? ' ⟲ takror' : item.issues.length ? ' ⚠' : '';
       console.log(
         `  ${String(item.rowNumber).padStart(3)}  ${item.itemBarcode}  ${String(item.quantity).padStart(3)}  ${item.sku ?? '—'}${marks}`,
       );
@@ -221,11 +250,92 @@ async function process_(
 
   console.log(
     `\n${result.documents.length} hujjat, ${result.rowsAppended} qator yozildi, ` +
+      (result.rowsRecovered ? `${result.rowsRecovered} ta navbatdan tiklandi, ` : '') +
+      (result.rowsPending ? `${result.rowsPending} ta navbatda qoldi, ` : '') +
+      (result.rowsSkipped ? `${result.rowsSkipped} ta takror o'tkazib yuborildi, ` : '') +
       `${result.flaggedRows} ta belgilandi. ` +
       `SKU: ${result.skuResolved} ta ishonchli manbadan, ${result.skuFromOcr} ta OCR dan ` +
       `(katalogda ${result.catalogueEntries} yozuv). ${(result.elapsedMs / 1000).toFixed(1)} s`,
   );
+  if (result.vlmUsage.requests > 0) {
+    const u = result.vlmUsage;
+    console.log(
+      `Gemini: ${u.requests} so'rov, ${u.inputTokens} kirish + ${u.outputTokens} chiqish` +
+        (u.thoughtTokens ? ` + ${u.thoughtTokens} fikrlash` : '') +
+        ` = ${u.totalTokens} token` +
+        (result.vlmRescuedPages ? `, ${result.vlmRescuedPages} sahifa qutqarildi` : ''),
+    );
+  }
   for (const w of result.warnings) console.log(`  DIQQAT: ${w}`);
+}
+
+
+/**
+ * Bayroqlar konfiguratsiyadan ustun turadi — sinov uchun kalitni
+ * `.env` da qoldirib, rejimni buyruq qatoridan boshqarish qulay.
+ */
+function vlmOptions(config: BarcodeerConfig, flags: Set<string>) {
+  if (flags.has('--no-gemini')) return undefined;
+  const mode = flags.has('--gemini-full')
+    ? 'full'
+    : flags.has('--gemini')
+      ? 'assist'
+      : config.geminiMode;
+  return vlmFromConfig({ ...config, geminiMode: mode });
+}
+
+/**
+ * Bitta sahifani FAQAT model orqali o'qiydi — quvursiz.
+ *
+ * Sozlamani tekshirish va modelning shu hujjat turida qanchalik
+ * ishlashini ko'rish uchun: natija va sarflangan tokenlar chiqariladi.
+ */
+async function commandGemini(config: BarcodeerConfig, target: string | undefined): Promise<void> {
+  if (!target) {
+    console.error('Rasm ko`rsatilmadi');
+    process.exitCode = 1;
+    return;
+  }
+  const vlm = vlmFromConfig({ ...config, geminiMode: 'full' });
+  if (!vlm) {
+    console.error('Gemini kaliti sozlanmagan (`.env` dagi GEMINI_API_KEY yoki sozlamalar oynasi)');
+    process.exitCode = 1;
+    return;
+  }
+
+  // Sahifa quvurdagi bilan AYNAN bir xil tayyorlanadi (deskew + JPEG),
+  // aks holda sinov natijasi haqiqiy ishlashdan farq qiladi.
+  const prepared = await preparePage(resolve(target));
+  const jpeg = await fullImage(prepared)
+    .resize({ width: WORK_WIDTH, kernel: 'lanczos3' })
+    .jpeg({ quality: 80 })
+    .toBuffer();
+
+  console.log(`${vlm.reader.model} ga yuborilmoqda (${(jpeg.length / 1024).toFixed(0)} KB)…`);
+  const started = Date.now();
+  const page = await vlm.reader.readPage(jpeg);
+  const usage = vlm.reader.usage;
+
+  if (!page) {
+    console.error(`O'qib bo'lmadi: ${vlm.reader.errors.join('; ')}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(`
+Hujjat: ${page.docId ?? '—'}  №${page.docNumber ?? '—'}  ${page.docDate ?? '—'}`);
+  console.log(`Qatorlar: ${page.rows.length}, Итого: ${page.totalQuantity ?? '—'}`);
+  for (const row of page.rows) {
+    console.log(
+      `  ${(row.barcode ?? '—').padEnd(14)} ${String(row.quantity ?? '—').padStart(4)}  ${row.sku ?? '—'}`,
+    );
+  }
+  console.log(
+    `
+${usage.inputTokens} kirish + ${usage.outputTokens} chiqish` +
+      (usage.thoughtTokens ? ` + ${usage.thoughtTokens} fikrlash` : '') +
+      ` = ${usage.totalTokens} token, ${((Date.now() - started) / 1000).toFixed(1)} s`,
+  );
 }
 
 /** Katalog sozlamalarini quvur formatiga o'giradi. */
@@ -264,7 +374,20 @@ function logProgress(event: ProgressEvent): void {
       console.log(`  PDF: ${event.path}`);
       break;
     case 'sheets':
-      console.log(`  Sheets: ${event.rows} qator (${event.flagged} belgilangan)`);
+      console.log(
+        `  Sheets: ${event.rows} qator (${event.flagged} belgilangan` +
+          (event.skipped ? `, ${event.skipped} takror o'tkazib yuborildi` : '') +
+          ')',
+      );
+      break;
+    case 'vlm':
+      console.log(
+        `  gemini: ${event.requests} so'rov, ${event.totalTokens} token` +
+          (event.rescuedPages ? `, ${event.rescuedPages} sahifa qutqarildi` : ''),
+      );
+      break;
+    case 'recovered':
+      console.log(`  navbatdan tiklandi: ${event.rows} qator (${event.batches} to'plam)`);
       break;
     case 'warning':
       console.log(`  DIQQAT: ${event.message}`);

@@ -8,13 +8,16 @@
 import { join } from 'node:path';
 import type { InvoiceDocument } from '@barcodeer/shared';
 import { OcrEngine } from '../ocr/engine.js';
-import { extractPage, type PageExtraction } from './extract-page.js';
+import { extractPage, type PageExtraction, type VlmOptions } from './extract-page.js';
+import { emptyUsage, type TokenUsage } from '../vlm/gemini.js';
 import { groupIntoDocuments } from './group.js';
 import { validateDocument } from './validate.js';
+import { markDuplicates } from './dedupe.js';
 import { SkuDictionary } from '../store/sku-dictionary.js';
 import { SkuCatalogue } from '../store/sku-catalogue.js';
 import { SkuResolver } from '../store/sku-resolver.js';
 import { DocumentIndex } from '../store/index-log.js';
+import { PendingQueue } from '../store/pending-batch.js';
 import { fetchCatalogue, type CatalogueSource } from '../input/catalogue-sheet.js';
 import { writeDocumentPdf } from '../output/pdf.js';
 import { SheetsWriter, type SheetsCredentials } from '../output/sheets.js';
@@ -27,8 +30,19 @@ export interface CatalogueOptions extends CatalogueSource {
 }
 
 export interface RunOptions {
-  /** Qayta ishlanadigan sahifa rasmlari (tartib muhim). */
-  pages: readonly string[];
+  /**
+   * Qayta ishlanadigan sahifa rasmlari (tartib muhim).
+   *
+   * `AsyncIterable` berilsa (skaner oqimi), sahifalar kelishi bilan qayta
+   * ishlanadi — skaner keyingi varaqni o'qiyotgan paytda. To'plamning umumiy
+   * vaqti "skan + qayta ishlash" emas, ikkalasidan kattasiga yaqin bo'ladi.
+   */
+  pages: Iterable<string> | AsyncIterable<string>;
+  /**
+   * Tayyor OCR dvigateli. Berilsa qayta ishlatiladi va YOPILMAYDI — tray
+   * ilova uni isitilgan holda saqlaydi (worker'larni yuklash ~2.4 s).
+   */
+  ocr?: OcrEngine;
   /** Tesseract til fayllari papkasi. */
   tessdataPath: string;
   /** SKU lug'ati, katalog va indeks saqlanadigan papka. */
@@ -39,6 +53,11 @@ export interface RunOptions {
   sheets?: SheetsWriter;
   /** Uzum katalogi. Berilmasa SKU faqat OCR dan olinadi. */
   catalogue?: CatalogueOptions;
+  /**
+   * Gemini zaxirasi (`vlm/setup.ts` dagi `vlmFromConfig`). Berilmasa quvur
+   * faqat deterministik bosqichlar bilan ishlaydi.
+   */
+  vlm?: VlmOptions;
   /** Skanerlash vaqti (PDF papkasi nomi shundan olinadi). */
   scannedAt?: Date;
   /** Jarayon haqida xabar berish. */
@@ -50,7 +69,9 @@ export type ProgressEvent =
   | { type: 'page'; index: number; total: number; path: string }
   | { type: 'grouped'; documents: number }
   | { type: 'pdf'; docId: string; path: string }
-  | { type: 'sheets'; rows: number; flagged: number }
+  | { type: 'sheets'; rows: number; flagged: number; skipped: number }
+  | { type: 'recovered'; rows: number; batches: number }
+  | { type: 'vlm'; requests: number; totalTokens: number; rescuedPages: number }
   | { type: 'warning'; message: string };
 
 export interface RunResult {
@@ -60,6 +81,22 @@ export interface RunResult {
   rowsAppended: number;
   /** `⚠` bilan belgilangan qatorlar. */
   flaggedRows: number;
+  /**
+   * `Ид документа + ШК` juftligi allaqachon yozilgan bo'lgani uchun
+   * o'tkazib yuborilgan qatorlar (takroriy skan).
+   */
+  rowsSkipped: number;
+  /**
+   * Oldingi skanerlashlarda Sheets ga yozilmay qolgan va SHU safar
+   * yozilgan qatorlar (`store/pending-batch.ts`).
+   */
+  rowsRecovered: number;
+  /** Hali ham navbatda turgan — yozilmagan qatorlar. */
+  rowsPending: number;
+  /** Til modeli sarflagan tokenlar. Model ishlatilmagan bo'lsa nol. */
+  vlmUsage: TokenUsage;
+  /** Deterministik yo'l bilan o'qilmay, model orqali qutqarilgan sahifalar. */
+  vlmRescuedPages: number;
   /** SKU si katalogdan yoki tasdiqlangan lug'atdan olingan qatorlar. */
   skuResolved: number;
   /** SKU si faqat OCR dan olingan qatorlar. */
@@ -79,22 +116,50 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     opts.onProgress?.({ type: 'warning', message });
   };
 
+  // OCR worker'lari darhol yuklana boshlaydi — bu katalog sinxronizatsiyasi
+  // va birinchi sahifaning skanerlanishi bilan bir vaqtda ketadi.
+  const ownOcr = opts.ocr === undefined;
+  const ocr = opts.ocr ?? new OcrEngine({ langPath: opts.tessdataPath });
+  const warm = ocr.warmUp().catch(() => {});
+
   const dictionary = await SkuDictionary.open(join(opts.dataDir, 'sku-map.json'));
   const index = await DocumentIndex.open(join(opts.dataDir, 'documents.jsonl'));
+  const pending = await PendingQueue.open(join(opts.dataDir, 'pending-batches.json'));
   const catalogue = await syncCatalogue(opts, scannedAt, warn);
   const resolver = new SkuResolver(catalogue, dictionary);
 
-  // --- Sahifalarni o'qish ---
-  const ocr = new OcrEngine({ langPath: opts.tessdataPath });
+  // SKU si ma'lum shtrix-kodlar uchun OCR umuman chaqirilmaydi.
+  const knownSku = (barcode: string) => resolver.resolve(barcode, null).trusted;
+
+  // --- Sahifalarni o'qish (kelishi bilan) ---
+  const total = Array.isArray(opts.pages) ? opts.pages.length : undefined;
   let extracted: PageExtraction[];
   try {
+    await warm;
     extracted = [];
-    for (const [i, path] of opts.pages.entries()) {
-      opts.onProgress?.({ type: 'page', index: i, total: opts.pages.length, path });
-      extracted.push(await extractPage(path, i, ocr, {}));
+    let i = 0;
+    for await (const path of opts.pages) {
+      opts.onProgress?.({ type: 'page', index: i, total: total ?? i + 1, path });
+      extracted.push(await extractPage(path, i, ocr, { knownSku, vlm: opts.vlm }));
+      i++;
     }
   } finally {
-    await ocr.close();
+    if (ownOcr) await ocr.close();
+  }
+
+  // --- Til modeli hisoboti ---
+  const vlmUsage = opts.vlm?.reader.usage ?? emptyUsage();
+  const vlmRescuedPages = extracted.filter((p) => p.vlmRescued).length;
+  if (vlmUsage.requests > 0) {
+    opts.onProgress?.({
+      type: 'vlm',
+      requests: vlmUsage.requests,
+      totalTokens: vlmUsage.totalTokens,
+      rescuedPages: vlmRescuedPages,
+    });
+  }
+  for (const message of opts.vlm?.reader.errors ?? []) {
+    warn(`Til modeli: ${message}`);
   }
 
   const { documents, orphanPages } = groupIntoDocuments(extracted, { scannedAt });
@@ -130,6 +195,16 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     validateDocument(doc, { knownDocIds, skuFromDictionary: trustedBarcodes });
   }
 
+  // Sarlavha tekshiruvi va mavjud `Ид + ШК` kalitlarini o'qish (tarmoq)
+  // PDF yozish (disk) bilan bir vaqtda ketadi.
+  const sheets = opts.sheets;
+  const existingKeys = sheets
+    ? sheets
+        .ensureHeaders()
+        .then(() => sheets.readRowKeys())
+        .catch((err: Error) => err)
+    : undefined;
+
   // --- PDF ---
   const pagesByIndex = new Map(extracted.map((p) => [p.pageIndex, p]));
   for (const doc of documents) {
@@ -153,18 +228,60 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     }
   }
 
+  // --- Takror qatorlar: Ид + ШК allaqachon yozilgan bo'lsa tashlab ketiladi ---
+  // Manba — Sheets'ning o'zi; Sheets o'chiq bo'lsa lokal indeks.
+  let rowsSkipped = 0;
+  let rowsRecovered = 0;
+  let sheetsError: Error | undefined;
+  const existing = existingKeys ? await existingKeys : index.rowKeys();
+  if (existing instanceof Error) {
+    sheetsError = existing;
+  } else {
+    // Navbat AVVAL bo'shatiladi: undagi qatorlar oldinroq skanerlangan,
+    // shuning uchun jadvalda ham oldinroq turishi kerak. Bu tartib takror
+    // tekshiruvi uchun ham to'g'ri — `markDuplicates` `existing` to'plamini
+    // to'ldirib boradi, ya'ni shu to'plamda takrorlangan hujjat ushlanadi.
+    if (sheets && pending.size > 0) {
+      rowsRecovered = await flushPending(pending, sheets, existing, opts, warn);
+    }
+    const dup = markDuplicates(documents, existing);
+    rowsSkipped = dup.skipped;
+    if (dup.skipped > 0) {
+      const detail = [...dup.byDocument].map(([id, n]) => `${id}: ${n}`).join(', ');
+      warn(`${dup.skipped} ta qator allaqachon yozilgan — o'tkazib yuborildi (${detail})`);
+    }
+  }
+  const flaggedRows = countFlagged(documents);
+
   // --- Google Sheets ---
   let rowsAppended = 0;
-  let flaggedRows = countFlagged(documents);
-  if (opts.sheets) {
+  if (sheets) {
     try {
-      await opts.sheets.ensureHeaders();
-      const res = await opts.sheets.appendDocuments(documents);
+      if (sheetsError) throw sheetsError;
+      const res = await sheets.appendDocuments(documents);
       rowsAppended = res.rowsAppended;
-      flaggedRows = res.flaggedRows;
-      opts.onProgress?.({ type: 'sheets', rows: res.rowsAppended, flagged: res.flaggedRows });
+      opts.onProgress?.({
+        type: 'sheets',
+        rows: res.rowsAppended,
+        flagged: res.flaggedRows,
+        skipped: res.rowsSkipped,
+      });
     } catch (err) {
-      warn(`Google Sheets ga yozib bo'lmadi: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      // Qatorlar yo'qolmaydi: navbatga tushadi va keyingi muvaffaqiyatli
+      // skanerlashda avtomatik yoziladi.
+      try {
+        await pending.add(documents, message, scannedAt);
+        warn(
+          `Google Sheets ga yozib bo'lmadi: ${message}. ` +
+            `Qatorlar navbatga saqlandi va keyingi skanerlashda yoziladi.`,
+        );
+      } catch (queueErr) {
+        warn(
+          `Google Sheets ga yozib bo'lmadi: ${message}. ` +
+            `Navbatga ham saqlanmadi: ${(queueErr as Error).message}`,
+        );
+      }
     }
   }
 
@@ -180,12 +297,52 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     orphanPages: orphanPages.length,
     rowsAppended,
     flaggedRows,
+    rowsSkipped,
+    rowsRecovered,
+    rowsPending: pending.rowCount,
+    vlmUsage,
+    vlmRescuedPages,
     skuResolved: trustedBarcodes.size,
     skuFromOcr,
     catalogueEntries: catalogue.size,
     elapsedMs: Date.now() - started,
     warnings,
   };
+}
+
+/**
+ * Oldin yozilmay qolgan hujjatlarni Sheets ga yozadi.
+ *
+ * Xato bo'lsa navbat SAQLANIB QOLADI va joriy to'plamni yozish davom etadi —
+ * eski to'plamning muammosi yangi skanni to'sib qo'ymasligi kerak.
+ *
+ * @returns yozilgan qatorlar soni
+ */
+async function flushPending(
+  pending: PendingQueue,
+  sheets: SheetsWriter,
+  existing: Set<string>,
+  opts: RunOptions,
+  warn: (message: string) => void,
+): Promise<number> {
+  const documents = pending.documents();
+  if (documents.length === 0) return 0;
+
+  const batches = pending.size;
+  try {
+    // Oradan vaqt o'tgan: qatorlar qo'lda yoki boshqa kompyuterdan
+    // yozilgan bo'lishi mumkin — shuning uchun qaytadan tekshiriladi.
+    markDuplicates(documents, existing);
+    const res = await sheets.appendDocuments(documents);
+    await pending.clear();
+    opts.onProgress?.({ type: 'recovered', rows: res.rowsAppended, batches });
+    return res.rowsAppended;
+  } catch (err) {
+    warn(
+      `Navbatdagi ${pending.rowCount} ta qator hali ham yozilmadi: ${(err as Error).message}`,
+    );
+    return 0;
+  }
 }
 
 /**
@@ -242,6 +399,7 @@ function countFlagged(documents: readonly InvoiceDocument[]): number {
   for (const doc of documents) {
     const docHasError = doc.issues.some((i) => i.severity === 'error');
     for (const item of doc.items) {
+      if (item.duplicate) continue; // yozilmaydi — belgilanmaydi ham
       if (docHasError || item.issues.length > 0) count++;
     }
   }

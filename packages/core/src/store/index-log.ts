@@ -12,6 +12,7 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { InvoiceDocument } from '@barcodeer/shared';
+import { rowKey } from '../pipeline/dedupe.js';
 
 export interface IndexEntry {
   docId: string;
@@ -22,6 +23,11 @@ export interface IndexEntry {
   pdfPath: string | null;
   /** Muammoli qatorlar soni. */
   flagged: number;
+  /**
+   * Qatorlarning ШК lari — Sheets o'chiq bo'lganda `Ид + ШК` takror
+   * tekshiruvi uchun. Eski yozuvlarda yo'q.
+   */
+  barcodes?: string[];
 }
 
 export class DocumentIndex {
@@ -60,6 +66,15 @@ export class DocumentIndex {
     return this.#ids;
   }
 
+  /** Oldin ko'rilgan `Ид + ШК` juftliklari. Har safar yangi to'plam — o'zgartirish xavfsiz. */
+  rowKeys(): Set<string> {
+    const keys = new Set<string>();
+    for (const entry of this.#entries) {
+      for (const barcode of entry.barcodes ?? []) keys.add(rowKey(entry.docId, barcode));
+    }
+    return keys;
+  }
+
   get size(): number {
     return this.#entries.length;
   }
@@ -85,6 +100,7 @@ export class DocumentIndex {
         flagged:
           doc.items.filter((i) => i.issues.length > 0).length +
           (doc.issues.some((i) => i.severity === 'error') ? doc.items.length : 0),
+        barcodes: doc.items.map((i) => i.itemBarcode).filter(Boolean),
       };
       this.#entries.push(entry);
       if (entry.docId) this.#ids.add(entry.docId);

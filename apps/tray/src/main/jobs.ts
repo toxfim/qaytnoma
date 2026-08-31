@@ -12,24 +12,57 @@ import { Notification, shell } from 'electron';
 import {
   fetchCatalogue,
   loadServiceAccount,
+  OcrEngine,
   runPipeline,
   SheetsWriter,
   SkuCatalogue,
+  vlmFromConfig,
   type BarcodeerConfig,
   type CatalogueOptions,
   type ProgressEvent,
   type RunResult,
 } from '@barcodeer/core';
-import { scanBatch } from '@barcodeer/scanner';
+import { scanStream } from '@barcodeer/scanner';
 import type { Store } from './state.js';
+import { showErrorDialog } from './error-dialog.js';
 
 export class JobRunner {
   #running = false;
+  /**
+   * Isitilgan OCR dvigateli — skanerlashlar orasida saqlanadi.
+   * Worker'larni yuklash ~2.4 s; ilova ishga tushganda fonda bajariladi,
+   * shunda birinchi skanerlash ham kutmaydi.
+   */
+  #ocr: OcrEngine | null = null;
+  #ocrPath = '';
+  /** Sheets yozuvchisi ham saqlanadi — sarlavha tekshiruvi bir marta bajariladi. */
+  #sheets: SheetsWriter | null = null;
+  #sheetsKey = '';
 
   constructor(private readonly store: Store) {}
 
   get running(): boolean {
     return this.#running;
+  }
+
+  /** OCR dvigatelini oldindan isitadi (ilova ishga tushganda chaqiriladi). */
+  prewarm(): void {
+    void this.#engine().warmUp().catch(() => {});
+  }
+
+  #engine(): OcrEngine {
+    const path = this.store.state.config.tessdataPath;
+    if (this.#ocr && this.#ocrPath === path) return this.#ocr;
+    // Til papkasi o'zgargan bo'lsa eskisini yopib, yangisini yaratamiz.
+    void this.#ocr?.close().catch(() => {});
+    this.#ocr = new OcrEngine({ langPath: path });
+    this.#ocrPath = path;
+    return this.#ocr;
+  }
+
+  async dispose(): Promise<void> {
+    await this.#ocr?.close().catch(() => {});
+    this.#ocr = null;
   }
 
   /** Skanerdan o'qib, to'liq quvurni bajaradi. */
@@ -43,22 +76,42 @@ export class JobRunner {
       workDir = await mkdtemp(join(tmpdir(), 'barcodeer-'));
       this.store.update({ activity: 'Skanerlanmoqda…' });
 
-      const scan = await scanBatch({
+      // Oqim rejimi: sahifalar skanerdan kelishi bilan qayta ishlanadi —
+      // skaner keyingi varaqni o'qiyotgan paytda.
+      const stream = scanStream({
         dpi: config.scanDpi,
         outDir: workDir,
         deviceName: config.scannerName,
+        // Skaner band bo'lsa skript uni daqiqalargacha kutadi; sababi
+        // ko'rinib tursin, aks holda tray sababsiz qotgandek tuyuladi.
+        onStatus: (message) => this.store.update({ activity: message }),
       });
 
+      // Quvur skanerlash bilan parallel ishlaydi, ammo skanerlash xatosini
+      // uni KUTMASDAN ko'rsatamiz. Quvur ishni Uzum katalogini yuklashdan
+      // boshlaydi (~23 000 qator, tarmoq), shuning uchun skaner umuman
+      // qo'zg'almagan holatda ham ikonka yana o'nlab soniya "bajarilmoqda"
+      // holatida turardi — foydalanuvchi sababni ko'rmay qolardi.
+      const processing = this.#process(config, stream.pages).then(
+        (value) => ({ value, error: null as Error | null }),
+        (error: Error) => ({ value: null, error }),
+      );
+
+      const scan = await stream.result;
       if (!scan.ok) {
         this.#fail(scanErrorMessage(scan.code, scan.error));
+        await processing;
         return;
       }
       if (scan.pages.length === 0) {
         this.#fail('Skanerda qog`oz topilmadi');
+        await processing;
         return;
       }
 
-      await this.#process(config, scan.pages);
+      const outcome = await processing;
+      if (!outcome.value) throw outcome.error ?? new Error('Qayta ishlash natijasiz tugadi');
+      this.#succeed(outcome.value);
     } catch (err) {
       this.#fail((err as Error).message);
     } finally {
@@ -105,6 +158,7 @@ export class JobRunner {
           documents: 0,
           rows: 0,
           flagged: 0,
+          skipped: 0,
           error: null,
         },
       });
@@ -122,7 +176,7 @@ export class JobRunner {
     if (!this.#begin('Fayllar qayta ishlanmoqda…')) return;
 
     try {
-      await this.#process(this.store.state.config, paths);
+      this.#succeed(await this.#process(this.store.state.config, paths));
     } catch (err) {
       this.#fail((err as Error).message);
     } finally {
@@ -130,32 +184,41 @@ export class JobRunner {
     }
   }
 
-  async #process(config: BarcodeerConfig, pages: readonly string[]): Promise<void> {
+  async #process(
+    config: BarcodeerConfig,
+    pages: Iterable<string> | AsyncIterable<string>,
+  ): Promise<RunResult> {
     let sheets: SheetsWriter | undefined;
     try {
-      sheets = new SheetsWriter({
-        spreadsheetId: config.spreadsheetId,
-        sheetName: config.sheetName,
-        credentials: await loadServiceAccount(config.serviceAccountPath),
-        flagColumn: config.flagColumn,
-      });
+      const key = [config.spreadsheetId, config.sheetName, config.serviceAccountPath, config.flagColumn].join('|');
+      if (!this.#sheets || this.#sheetsKey !== key) {
+        this.#sheets = new SheetsWriter({
+          spreadsheetId: config.spreadsheetId,
+          sheetName: config.sheetName,
+          credentials: await loadServiceAccount(config.serviceAccountPath),
+          flagColumn: config.flagColumn,
+        });
+        this.#sheetsKey = key;
+      }
+      sheets = this.#sheets;
     } catch (err) {
       // Sheets sozlanmagan bo'lsa ham PDF saqlanadi — skanerlangan qog'oz
       // behuda ketmasligi kerak.
       this.store.update({ activity: `Sheets o'chirildi: ${(err as Error).message}` });
     }
 
-    const result = await runPipeline({
+    return runPipeline({
       pages,
+      ocr: this.#engine(),
       tessdataPath: config.tessdataPath,
       dataDir: config.dataDir,
       invoicesRoot: config.invoicesRoot,
       sheets,
       catalogue: await catalogueOptions(config),
+      // Kalit kiritilmagan yoki rejim `off` bo'lsa `undefined` qaytadi.
+      vlm: vlmFromConfig(config),
       onProgress: (event) => this.store.update({ activity: describe(event) }),
     });
-
-    this.#succeed(result);
   }
 
   #begin(activity: string): boolean {
@@ -179,6 +242,7 @@ export class JobRunner {
       documents: result.documents.length,
       rows: result.rowsAppended,
       flagged: result.flaggedRows,
+      skipped: result.rowsSkipped,
       error: result.warnings[0] ?? null,
     };
     this.store.update({
@@ -189,6 +253,9 @@ export class JobRunner {
 
     const body =
       `${result.documents.length} hujjat, ${result.rowsAppended} qator yozildi` +
+      (result.rowsRecovered ? `, shundan ${result.rowsRecovered} tasi oldingi navbatdan` : '') +
+      (result.rowsPending ? `, ${result.rowsPending} qator navbatda qoldi` : '') +
+      (result.rowsSkipped ? `, ${result.rowsSkipped} ta takror o'tkazib yuborildi` : '') +
       (result.flaggedRows ? `, ${result.flaggedRows} ta tekshiruvga` : '') +
       (result.warnings.length ? `\n${result.warnings[0]}` : '');
 
@@ -204,10 +271,13 @@ export class JobRunner {
         documents: 0,
         rows: 0,
         flagged: 0,
+        skipped: 0,
         error: message,
       },
     });
-    notify('Skanerlash bajarilmadi', message, null);
+    // Bildirishnoma emas, modal: xato sababi ko'rinmay qolmasligi kerak
+    // (`error-dialog.ts` da nega — batafsil).
+    void showErrorDialog('Ish bajarilmadi', message);
   }
 }
 
@@ -244,7 +314,14 @@ function describe(event: ProgressEvent): string {
     case 'pdf':
       return `PDF saqlandi: ${event.docId}`;
     case 'sheets':
-      return `Sheets: ${event.rows} qator`;
+      return `Sheets: ${event.rows} qator` + (event.skipped ? `, ${event.skipped} takror o'tkazildi` : '');
+    case 'recovered':
+      return `Navbatdan tiklandi: ${event.rows} qator`;
+    case 'vlm':
+      return (
+        `Til modeli: ${event.requests} so'rov, ${event.totalTokens} token` +
+        (event.rescuedPages ? `, ${event.rescuedPages} sahifa qutqarildi` : '')
+      );
     case 'warning':
       return event.message;
   }
@@ -253,12 +330,18 @@ function describe(event: ProgressEvent): string {
 function scanErrorMessage(code: string, error: string): string {
   switch (code) {
     case 'NO_DEVICE':
-      return 'Skaner topilmadi — USB ulanishini tekshiring';
+      return 'Skaner topilmadi — USB ulanishini va WIA drayverini tekshiring';
+    case 'SCRIPT_MISSING':
+      return `Dastur to'liq o'rnatilmagan (${error}) — o'rnatgichni qayta yuklab, qayta o'rnating`;
     case 'NO_PAPER':
       return 'Avtomatik uzatgichda qog`oz yo`q';
+    case 'NO_RESPONSE':
+      return 'Skaner javob bermayapti — uni o`chirib-yoqing (yoki USB kabelini uzib-ulang) va qayta urinib ko`ring';
     case 'TIMEOUT':
-      return 'Skanerlash juda uzoq davom etdi';
+      return 'Skanerlash juda uzoq davom etdi — skanerni boshqa dastur ushlab turgan bo`lishi mumkin';
     default:
+      // `DEVICE_BUSY` shu yerdan o'tadi: skript xabarni o'zi tuzadi —
+      // qurilmani aynan qaysi dastur ushlab turgani faqat o'sha yerda ma'lum.
       return error;
   }
 }

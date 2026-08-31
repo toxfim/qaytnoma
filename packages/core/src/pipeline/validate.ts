@@ -116,6 +116,31 @@ export function validateDocument(doc: InvoiceDocument, opts: ValidateOptions = {
       );
     }
 
+    // Til modeli o'qigan qiymat — dekoder emas, taxmin. Qator jadvalga
+    // tushadi, lekin inson ko'zdan kechirishi uchun belgilanadi.
+    if (item.quantitySource === 'vlm') {
+      item.issues.push(
+        issue(
+          'VLM_SOURCED',
+          'warn',
+          `Miqdor til modeli orqali o'qildi: ${item.quantity ?? '—'}`,
+          'quantity',
+          item.rowNumber,
+        ),
+      );
+    }
+    if (item.skuSource === 'vlm') {
+      item.issues.push(
+        issue(
+          'VLM_SOURCED',
+          'warn',
+          `SKU til modeli orqali o'qildi: ${item.sku ?? '—'}`,
+          'sku',
+          item.rowNumber,
+        ),
+      );
+    }
+
     const fromDict = opts.skuFromDictionary?.has(item.itemBarcode) ?? false;
     if (!item.sku) {
       item.issues.push(issue('SKU_MISSING', 'error', 'SKU o`qilmadi', 'sku', item.rowNumber));
@@ -181,6 +206,8 @@ export function validateDocument(doc: InvoiceDocument, opts: ValidateOptions = {
 export function rowNeedsReview(doc: InvoiceDocument, index: number): boolean {
   const item = doc.items[index];
   if (!item) return true;
+  // Takror qator yozilmaydi — tekshiruvga ham tushmaydi.
+  if (item.duplicate) return false;
   // Hujjat darajasidagi xatolar barcha qatorlarga tegishli.
   return item.issues.length > 0 || doc.issues.some((i) => i.severity === 'error');
 }

@@ -20,6 +20,12 @@ export function defaultDataDir(): string {
 export const configSchema = z.object({
   /** Dastur yoqilganmi — o'chirilgan bo'lsa skanerlash ham, kuzatuv ham ishlamaydi. */
   enabled: z.boolean().default(true),
+  /**
+   * Foydalanuvchi Windows bilan avtomatik ishga tushishni ochiq o'chirgan.
+   * Standart holatda dastur o'zini startup'ga qo'shadi va har ishga tushganda
+   * yozuv joyida ekanini tekshiradi; bu bayroq o'sha tekshiruvni to'xtatadi.
+   */
+  autoLaunchDisabled: z.boolean().default(false),
 
   /**
    * Google Sheets hujjatining ID si.
@@ -42,8 +48,8 @@ export const configSchema = z.object({
   /** Kuzatiladigan papka (skanerning o'z tugmasi orqali chiqqan fayllar uchun). */
   hotFolder: z.string().nullable().default(null),
 
-  /** Skanerlash ruxsati. 600 = optik maksimum (DS-530 II). */
-  scanDpi: z.number().int().min(100).max(1200).default(600),
+  /** Skanerlash ruxsati. 300 — aniqlik 600 bilan bir xil, tezlik ikki barobar. */
+  scanDpi: z.number().int().min(100).max(1200).default(300),
   /** Qurilma nomining bir qismi. */
   scannerName: z.string().default('DS-530'),
 
@@ -61,6 +67,22 @@ export const configSchema = z.object({
   catalogueBarcodeColumn: z.string().default('G'),
   /** Katalog shundan eski bo'lsa skanerlashdan oldin avtomatik yangilanadi. */
   catalogueMaxAgeHours: z.number().min(0).default(24),
+
+  // ---- Gemini (til modeli zaxirasi) ----
+  /**
+   * Gemini API kaliti. Bo'sh bo'lsa model umuman ishlatilmaydi va quvur
+   * avvalgidek — faqat deterministik bosqichlar bilan — ishlaydi.
+   */
+  geminiApiKey: z.string().default(''),
+  /** Model nomi. `gemini-3.5-flash-lite` arzonroq, `gemini-3.7-flash` aniqroq. */
+  geminiModel: z.string().default('gemini-3.7-flash'),
+  /**
+   * `off`    — model chaqirilmaydi;
+   * `assist` — faqat OCR o'qiy olmagan kataklar va butunlay o'qilmagan
+   *            sahifalar modelga beriladi (tavsiya etiladi);
+   * `full`   — har bir sahifa to'liq modelga ham beriladi (qimmat).
+   */
+  geminiMode: z.enum(['off', 'assist', 'full']).default('off'),
 
   /** Tesseract til fayllari papkasi. */
   tessdataPath: z.string().min(1),
@@ -100,13 +122,16 @@ export function defaults(dataDir = defaultDataDir()): Partial<BarcodeerConfig> {
     flagColumn: true,
     invoicesRoot: join(homedir(), 'Documents', 'Invoices'),
     hotFolder: null,
-    scanDpi: 600,
+    scanDpi: 300,
     scannerName: 'DS-530',
     catalogueSpreadsheetId: null,
     catalogueSheetName: 'Остаток Узум',
     catalogueSkuColumn: 'B',
     catalogueBarcodeColumn: 'G',
     catalogueMaxAgeHours: 24,
+    geminiApiKey: '',
+    geminiModel: 'gemini-3.7-flash',
+    geminiMode: 'off',
     tessdataPath: join(dataDir, 'tessdata'),
     dataDir,
     // `spreadsheetId` va `serviceAccountPath` ATAYLAB yo'q: ular aniqlanmagan
@@ -149,6 +174,9 @@ export async function loadConfig(opts: LoadOptions = {}): Promise<BarcodeerConfi
     if (env.FINANCE_SHEET_ID) raw.catalogueSpreadsheetId ??= env.FINANCE_SHEET_ID;
     if (env.FINANCE_UZUM_STOCKS) raw.catalogueSheetName = env.FINANCE_UZUM_STOCKS;
     raw.serviceAccountPath ??= join(opts.devRoot, 'credentials.local.json');
+    // Kalit `.env` da turadi — repoga tushmasin.
+    if (env.GEMINI_API_KEY) raw.geminiApiKey ||= env.GEMINI_API_KEY;
+    if (env.GEMINI_MODEL) raw.geminiModel = env.GEMINI_MODEL;
 
     // Repo ichida yuklab olingan til fayllari bo'lsa, ular ustuvor —
     // ishlab chiqishda `%APPDATA%` ga nusxa ko'chirish shart bo'lmasin.

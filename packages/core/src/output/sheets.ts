@@ -15,6 +15,8 @@ import {
   type Issue,
 } from '@barcodeer/shared';
 import { rowNeedsReview } from '../pipeline/validate.js';
+import { duplicateIssue, rowKey } from '../pipeline/dedupe.js';
+import { withRetry } from '../util/retry.js';
 
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
@@ -41,11 +43,15 @@ export interface AppendResult {
   rowsAppended: number;
   logRowsAppended: number;
   flaggedRows: number;
+  /** `duplicate` belgisi bilan kelgan — yozilmagan, faqat `_log` ga tushgan qatorlar. */
+  rowsSkipped: number;
 }
 
 export class SheetsWriter {
   readonly #api: sheets_v4.Sheets;
   readonly #opts: Required<Omit<SheetsWriterOptions, 'credentials'>>;
+  /** Sarlavhalar shu nusxada allaqachon tekshirilgan — 3 ta API so'rovi tejaladi. */
+  #headersEnsured = false;
 
   constructor(opts: SheetsWriterOptions) {
     // `googleapis` o'rniga faqat Sheets mijozi ishlatiladi: to'liq paket
@@ -67,18 +73,27 @@ export class SheetsWriter {
 
   /** Ulanish va ruxsatlarni tekshiradi; varaq nomini qaytaradi. */
   async check(): Promise<{ title: string; sheets: string[] }> {
-    const res = await this.#api.spreadsheets.get({
-      spreadsheetId: this.#opts.spreadsheetId,
-      fields: 'properties.title,sheets.properties.title',
-    });
+    const res = await withRetry(() =>
+      this.#api.spreadsheets.get({
+        spreadsheetId: this.#opts.spreadsheetId,
+        fields: 'properties.title,sheets.properties.title',
+      }),
+    );
     return {
       title: res.data.properties?.title ?? '',
       sheets: (res.data.sheets ?? []).map((s) => s.properties?.title ?? ''),
     };
   }
 
-  /** Varaq bo'sh bo'lsa sarlavha qatorini qo'yadi. */
+  /**
+   * Varaq bo'sh bo'lsa sarlavha qatorini qo'yadi.
+   *
+   * Bir nusxada faqat bir marta bajariladi: uchta ketma-ket API so'rovi
+   * (~1.5 s) har skanerlashda takrorlanishi shart emas. Tray ilova bitta
+   * yozuvchini skanerlashlar orasida saqlaydi.
+   */
   async ensureHeaders(): Promise<void> {
+    if (this.#headersEnsured) return;
     const existing = await this.check();
 
     if (!(await this.#hasHeader(this.#opts.sheetName))) {
@@ -92,16 +107,56 @@ export class SheetsWriter {
         await this.#append(LOG_SHEET_NAME, [[...LOG_SHEET_HEADERS]]);
       }
     }
+    this.#headersEnsured = true;
   }
 
-  /** Hujjatlarni asosiy varaqqa va diagnostikani `_log` ga qo'shadi. */
+  /**
+   * Asosiy varaqdagi barcha `Ид документа + ШК` juftliklarini o'qiydi —
+   * takror qatorlarni yozishdan oldin aniqlash uchun (`pipeline/dedupe.ts`).
+   * Bitta so'rov; 50 000 qatorli varaqda ham bir necha yuz KB.
+   *
+   * `UNFORMATTED_VALUE`: kimdir ШК ni raqam sifatida kiritgan bo'lsa ham
+   * `1000076316479` qaytadi, ko'rsatish formatiga (`1E+12`) bog'liq emas.
+   */
+  async readRowKeys(): Promise<Set<string>> {
+    const docCol = SHEET_HEADERS.indexOf('Ид документа');
+    const barcodeCol = SHEET_HEADERS.indexOf('ШК');
+    const res = await withRetry(() =>
+      this.#api.spreadsheets.values.get({
+        spreadsheetId: this.#opts.spreadsheetId,
+        range: `${quote(this.#opts.sheetName)}!A2:${columnLetter(Math.max(docCol, barcodeCol))}`,
+        valueRenderOption: 'UNFORMATTED_VALUE',
+      }),
+    );
+
+    const keys = new Set<string>();
+    for (const row of res.data.values ?? []) {
+      const docId = String(row[docCol] ?? '').trim();
+      const barcode = String(row[barcodeCol] ?? '').trim();
+      if (docId && barcode) keys.add(rowKey(docId, barcode));
+    }
+    return keys;
+  }
+
+  /**
+   * Hujjatlarni asosiy varaqqa va diagnostikani `_log` ga qo'shadi.
+   *
+   * `duplicate` belgili qatorlar asosiy varaqqa yozilmaydi — ular haqida
+   * faqat `_log` da `DUPLICATE_ROW` yozuvi qoladi.
+   */
   async appendDocuments(documents: readonly InvoiceDocument[]): Promise<AppendResult> {
     const rows: (string | number)[][] = [];
     const logRows: (string | number)[][] = [];
     let flaggedRows = 0;
+    let rowsSkipped = 0;
 
     for (const doc of documents) {
       doc.items.forEach((item, index) => {
+        if (item.duplicate) {
+          rowsSkipped++;
+          if (this.#opts.writeLog) logRows.push(logRow(doc, duplicateIssue(item)));
+          return;
+        }
         const needsReview = rowNeedsReview(doc, index);
         if (needsReview) flaggedRows++;
 
@@ -120,6 +175,7 @@ export class SheetsWriter {
       if (this.#opts.writeLog) {
         for (const issue of doc.issues) logRows.push(logRow(doc, issue));
         for (const item of doc.items) {
+          if (item.duplicate) continue;
           for (const issue of item.issues) logRows.push(logRow(doc, issue));
         }
       }
@@ -128,7 +184,7 @@ export class SheetsWriter {
     if (rows.length > 0) await this.#append(this.#opts.sheetName, rows);
     if (logRows.length > 0) await this.#append(LOG_SHEET_NAME, logRows);
 
-    return { rowsAppended: rows.length, logRowsAppended: logRows.length, flaggedRows };
+    return { rowsAppended: rows.length, logRowsAppended: logRows.length, flaggedRows, rowsSkipped };
   }
 
   async #hasHeader(sheetName: string): Promise<boolean> {
@@ -144,20 +200,32 @@ export class SheetsWriter {
   }
 
   async #createSheet(title: string): Promise<void> {
-    await this.#api.spreadsheets.batchUpdate({
-      spreadsheetId: this.#opts.spreadsheetId,
-      requestBody: { requests: [{ addSheet: { properties: { title } } }] },
-    });
+    await withRetry(() =>
+      this.#api.spreadsheets.batchUpdate({
+        spreadsheetId: this.#opts.spreadsheetId,
+        requestBody: { requests: [{ addSheet: { properties: { title } } }] },
+      }),
+    );
   }
 
+  /**
+   * Qatorlarni qo'shadi.
+   *
+   * `INSERT_ROWS` + qayta urinish birgalikda xavfsiz: so'rov serverga yetib
+   * borgan, ammo javob yo'qolgan holatda takror yozilishi MUMKIN — shuning
+   * uchun oxirgi himoya `pipeline/dedupe.ts` dagi `Ид + ШК` kaliti bo'lib
+   * qoladi, u keyingi skanerlashda nusxani ushlaydi.
+   */
   async #append(sheetName: string, values: (string | number)[][]): Promise<void> {
-    await this.#api.spreadsheets.values.append({
-      spreadsheetId: this.#opts.spreadsheetId,
-      range: `${quote(sheetName)}!A1`,
-      valueInputOption: 'RAW',
-      insertDataOption: 'INSERT_ROWS',
-      requestBody: { values },
-    });
+    await withRetry(() =>
+      this.#api.spreadsheets.values.append({
+        spreadsheetId: this.#opts.spreadsheetId,
+        range: `${quote(sheetName)}!A1`,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values },
+      }),
+    );
   }
 }
 
@@ -173,6 +241,15 @@ function logRow(doc: InvoiceDocument, issue: Issue): (string | number)[] {
     issue.message,
     doc.pdfPath ?? '',
   ];
+}
+
+/** 0 → `A`, 25 → `Z`, 26 → `AA`. */
+function columnLetter(index: number): string {
+  let letters = '';
+  for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) {
+    letters = String.fromCharCode(65 + ((n - 1) % 26)) + letters;
+  }
+  return letters;
 }
 
 /** Varaq nomida bo'shliq yoki maxsus belgi bo'lsa A1 notatsiyasida qo'shtirnoq kerak. */

@@ -1,0 +1,59 @@
+# Qaytnoma AI o'rnatgichi.
+#
+# Asosiy `electron-builder.yml` bilan bir xil tuzilgan, uchta farq bilan:
+#
+#   1. `appId` va `productName` boshqa — Windows ikkalasini alohida dastur
+#      deb biladi, o'rnatish papkasi ham, "Dasturlarni o'chirish" ro'yxatidagi
+#      yozuv ham alohida bo'ladi. Ikkalasi yonma-yon turadi.
+#   2. Tesseract til fayllari YO'Q. Bu ilovada OCR ishlatilmaydi, shuning
+#      uchun `extraResources` olib tashlandi — o'rnatgich ~25 MB yengilroq.
+#   3. `asarUnpack` da tesseract va zxing yo'q: ular kodda import qilinadi,
+#      ammo hech qachon yuklanmaydi (worker ham, wasm ham talab bo'lganda
+#      ochiladi), shuning uchun arxiv ichida qolgani yetarli.
+#
+# Yig'ishni `node scripts/build-installer.mjs qaytnoma-ai` bajaradi.
+
+appId: uz.uzum.qaytnoma-ai
+productName: Qaytnoma AI
+copyright: Uzum Market
+
+directories:
+  app: build/app-ai
+  buildResources: build/resources-ai
+  output: build/dist-ai
+
+npmRebuild: false
+nodeGypRebuild: false
+buildDependenciesFromSource: false
+
+# `wia-scan.ps1` ni `powershell.exe` o'qiydi, Node emas — tashqi jarayon uchun
+# `app.asar` oddiy fayl, papka emas. Arxiv ichida qolsa ilova muammosiz ishga
+# tushadi va faqat "Skanerlash" bosilganda skaner qo'zg'almaydi.
+# `scriptPath()` (packages/scanner/src/index.ts) yo'lni `app.asar.unpacked`
+# ga yo'naltiradi — ikkalasi juft ishlaydi.
+asar: true
+asarUnpack:
+  - '**/node_modules/sharp/**'
+  - '**/node_modules/@img/**'
+  - '**/node_modules/@barcodeer/scanner/scripts/**'
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/resources-ai/icon.ico
+  # Kod imzosi yo'q — o'rnatishda Windows SmartScreen ogohlantiradi.
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Qaytnoma AI
+  artifactName: qaytnoma-ai-setup.exe
+  deleteAppDataOnUninstall: false
+  installerLanguages:
+    - en_US
+    - ru_RU
