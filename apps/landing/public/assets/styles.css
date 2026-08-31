@@ -329,6 +329,14 @@ code {
   gap: 12px;
 }
 
+.edition__icon {
+  /* Ilovaning o'z ikonkasi (512 px manba) — tray'dagi bilan bir xil belgi. */
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  flex: none;
+}
+
 .edition__name {
   font-family: var(--display);
   font-size: 22px;
