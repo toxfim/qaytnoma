@@ -195,6 +195,7 @@ async function commandScan(
     outDir,
     deviceName: config.scannerName,
     ...(maxPages ? { maxPages } : {}),
+    onStatus: (message) => console.log(message),
   });
   await process_(config, flags, rest, stream.pages);
 

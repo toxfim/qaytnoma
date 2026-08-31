@@ -156,7 +156,13 @@ async function commandScan(config: BarcodeerConfig, flags: Set<string>, rest: st
   const started = Date.now();
 
   // Oqim rejimi: sahifalar skanerdan kelishi bilan qayta ishlanadi.
-  const stream = scanStream({ dpi, outDir, deviceName: config.scannerName, maxPages });
+  const stream = scanStream({
+    dpi,
+    outDir,
+    deviceName: config.scannerName,
+    maxPages,
+    onStatus: (message) => console.log(message),
+  });
   await process_(config, flags, stream.pages);
 
   const result = await stream.result;

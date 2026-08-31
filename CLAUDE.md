@@ -361,6 +361,28 @@ longer the mechanism for *finding* rows.
   bypassed the parser entirely). A rejected date becomes `null`, so the
   multi-threshold vote in `extract-page.ts` picks another reading and, failing
   that, validation reports `DOC_DATE_MISSING`.
+- **`WIA_ERROR_BUSY` does not mean the device is in use.** After a WIA session
+  ends badly — the scan process killed, the app closed mid-transfer, another
+  scanner program opened and closed — the driver keeps reserving an idle
+  DS-530II and answers `0x80210006 The device is busy` to every `Connect()`.
+  Measured: 82 seconds of that, then it cleared on its own with no
+  intervention. The old code gave up on the first try and showed the driver's
+  English string, so a scan failed over a minute of nothing. `wia-scan.ps1` now
+  retries `Connect`/`Transfer` for `-BusyWaitSec` (120 s default) with backoff,
+  streams `{"event":"status"}` lines so the tray says what it is waiting for,
+  and reports `DEVICE_BUSY` naming the scanner apps that are actually running
+  (Windows Scan, Epson Event Manager, …) — plus a separate check for the
+  *other* Qaytnoma app running `wia-scan.ps1` right now. The prevention half is
+  the `finally` block: COM objects are released explicitly, because leaving the
+  session open is what makes the NEXT run busy.
+- **A wedged scanner blocks `Transfer` forever, and the 10-minute timeout is
+  far too late.** Measured with the device reporting `OK` on USB and
+  `FEED_READY` on the ADF sensor: `Transfer` never returned in 6 minutes, and
+  replugging the USB cable was the only fix. `runScript` now also watches for
+  SILENCE — any output (page, status, stderr log) resets it, so 2 minutes with
+  nothing at all means the device is stuck: kill the process tree and report
+  `NO_RESPONSE` ("power-cycle the scanner"). One page at 300 DPI takes ~6 s and
+  the busy loop prints every ~11 s, so the window is not tight.
 - **Report the scan error without waiting for the pipeline.** `runPipeline` opens by syncing the ~23 000-row catalogue over the network, so a `Promise.all` of scan + pipeline left the tray amber for another half-minute after the scanner had already failed, hiding the cause.
 
 **Known pitfalls to design around:** scanners write incrementally, so ingesting mid-write corrupts files; higher DPI is *not* monotonically better for Code128 (test 200/300/400 empirically); ZXing has narrow tilt tolerance on scans — keep a zbar/rotate/upscale fallback; Tesseract PSM 3 returns "Empty page" on single-cell crops; if the hot folder is an SMB share, poll rather than rely on FS events.

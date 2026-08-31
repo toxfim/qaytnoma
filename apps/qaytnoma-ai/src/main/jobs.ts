@@ -50,6 +50,9 @@ export class JobRunner {
         dpi: config.scanDpi,
         outDir: workDir,
         deviceName: config.scannerName,
+        // Skaner band bo'lsa skript uni daqiqalargacha kutadi; sababi
+        // ko'rinib tursin, aks holda tray sababsiz qotgandek tuyuladi.
+        onStatus: (message) => this.store.update({ activity: message }),
       });
 
       // Skanerlash xatosi quvurni KUTMASDAN ko'rsatiladi: quvur katalogni
@@ -269,9 +272,13 @@ function scanErrorMessage(code: string, error: string): string {
       return `Dastur to'liq o'rnatilmagan (${error}) — o'rnatgichni qayta yuklab, qayta o'rnating`;
     case 'NO_PAPER':
       return 'Avtomatik uzatgichda qog`oz yo`q';
+    case 'NO_RESPONSE':
+      return 'Skaner javob bermayapti — uni o`chirib-yoqing (yoki USB kabelini uzib-ulang) va qayta urinib ko`ring';
     case 'TIMEOUT':
-      return 'Skanerlash juda uzoq davom etdi';
+      return 'Skanerlash juda uzoq davom etdi — skanerni boshqa dastur ushlab turgan bo`lishi mumkin';
     default:
+      // `DEVICE_BUSY` shu yerdan o'tadi: skript xabarni o'zi tuzadi —
+      // qurilmani aynan qaysi dastur ushlab turgani faqat o'sha yerda ma'lum.
       return error;
   }
 }
