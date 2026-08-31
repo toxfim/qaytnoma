@@ -15,7 +15,12 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="assets/styles.css" />
+    <!-- `?v=` — kesh buzgich: bu papkada Cache-Control yo'q, shuning uchun
+         brauzer eski `styles.css` / `app.js` ni saqlab qolardi. Aynan shu
+         ko'rindi — yangi `meta.json` eski skript bilan o'qilib, versiya
+         o'rniga "undefined · NaN MB" chiqdi. Fayllarni o'zgartirganda shu
+         raqamni ham oshiring. -->
+    <link rel="stylesheet" href="assets/styles.css?v=2" />
   </head>
   <body>
     <div class="page">
@@ -449,6 +454,6 @@
       </footer>
     </div>
 
-    <script src="assets/app.js"></script>
+    <script src="assets/app.js?v=2"></script>
   </body>
 </html>
